@@ -11,14 +11,9 @@ brew install mullvad-vpn
 brew install tailscale
 ```
 
-Start the Tailscale daemon (runs as a launchd service):
+### Mullvad
 
-```bash
-sudo brew services start tailscale
-tailscale up
-```
-
-Connect Mullvad (CLI-only — the `mullvad-vpn` formula includes the CLI):
+Mullvad's cask (`mullvad-vpn`) installs a system daemon that starts automatically at boot — no additional configuration needed for autostart.
 
 ```bash
 mullvad account login <ACCOUNT_NUMBER>
@@ -31,10 +26,59 @@ Mullvad settings this fix assumes:
 ```bash
 mullvad lockdown-mode set on        # "Always require VPN" — enables the PF kill switch
 mullvad dns set default              # Use Mullvad's DNS (no custom DNS that could leak)
-mullvad auto-connect set on          # Reconnect on boot
 ```
 
-With these settings active, Tailscale traffic is blocked until the PF anchor below is installed.
+### Tailscale
+
+Homebrew's `tailscale` formula only installs the binaries — it doesn't install a system-level daemon. To make `tailscaled` start at boot (without logging into any user account), a custom LaunchDaemon is used instead of `brew services`.
+
+**Create the plist:**
+
+```bash
+sudo tee /Library/LaunchDaemons/com.tailscale.tailscaled.plist > /dev/null <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.tailscale.tailscaled</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/homebrew/bin/tailscaled</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/var/log/tailscaled.log</string>
+    <key>StandardErrorPath</key>
+    <string>/var/log/tailscaled.err</string>
+</dict>
+</plist>
+EOF
+```
+
+**Load it and authenticate:**
+
+```bash
+sudo launchctl load /Library/LaunchDaemons/com.tailscale.tailscaled.plist
+tailscale up
+```
+
+This runs `tailscaled` as root via launchd with `RunAtLoad` (starts at boot) and `KeepAlive` (restarts if it crashes). Logs go to `/var/log/tailscaled.log` and `/var/log/tailscaled.err`.
+
+Why not `brew services start tailscale`? Brew services installs a LaunchAgent under the current user, which only runs when that user is logged in. A LaunchDaemon in `/Library/LaunchDaemons/` runs at boot regardless of who (if anyone) is logged in.
+
+**Optional — set an operator user:**
+
+```bash
+sudo tailscale set --operator=<USERNAME>
+```
+
+This lets a non-admin user run `tailscale status`, `tailscale ping`, and other Tailscale commands without `sudo`.
+
+With both VPNs active, Tailscale traffic is blocked until the PF anchor below is installed.
 
 ## The problem
 
