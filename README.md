@@ -2,6 +2,40 @@
 
 Mullvad's kill switch silently drops Tailscale traffic on macOS. This repo contains a fix: a persistent PF anchor that whitelists Tailscale's CGNAT range before Mullvad's firewall rules evaluate it.
 
+## Prerequisites
+
+Both tools are installed via Homebrew and managed from the CLI — no GUI apps.
+
+```bash
+brew install mullvad-vpn
+brew install tailscale
+```
+
+Start the Tailscale daemon (runs as a launchd service):
+
+```bash
+sudo brew services start tailscale
+tailscale up
+```
+
+Connect Mullvad (CLI-only — the `mullvad-vpn` formula includes the CLI):
+
+```bash
+mullvad account login <ACCOUNT_NUMBER>
+mullvad relay set location <COUNTRY> <CITY>   # e.g. ch zrh
+mullvad connect
+```
+
+Mullvad settings this fix assumes:
+
+```bash
+mullvad lockdown-mode set on        # "Always require VPN" — enables the PF kill switch
+mullvad dns set default              # Use Mullvad's DNS (no custom DNS that could leak)
+mullvad auto-connect set on          # Reconnect on boot
+```
+
+With these settings active, Tailscale traffic is blocked until the PF anchor below is installed.
+
 ## The problem
 
 Mullvad implements its kill switch using macOS PF (Packet Filter). When connected (or when "Always require VPN" is enabled), Mullvad dynamically injects PF rules that:
