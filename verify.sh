@@ -197,7 +197,7 @@ else
 fi
 
 echo ""
-echo "=== Results: ${GREEN}${PASS} passed${NC}, ${RED}${FAIL} failed${NC}, ${YELLOW}${WARN} warnings${NC} ==="
+echo "=== Results: ${PASS} passed, ${FAIL} failed, ${WARN} warnings ==="
 
 if [[ $FAIL -gt 0 ]]; then
   echo -e "${RED}Some checks failed. Review install.sh, verify.sh, or your local VPN state before proceeding.${NC}"
