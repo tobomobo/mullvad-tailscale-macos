@@ -96,7 +96,17 @@ This removes the anchor file, strips the anchor lines from `pf.conf` (after back
 
 After installing, verify with these commands:
 
-### 1. Confirm the anchor is loaded
+### Quick check
+
+```bash
+sudo bash verify.sh
+```
+
+This checks the anchor file, pf.conf references, PF runtime state, interface assignment, and whether both daemons are running.
+
+### Manual checks
+
+**Confirm the anchor is loaded:**
 
 ```bash
 sudo pfctl -a tailscale -sr
@@ -111,7 +121,7 @@ pass out quick on utun0 inet6 from any to fd7a:115c:a1e0::/48 no state
 pass in quick on utun0 inet6 from fd7a:115c:a1e0::/48 to any no state
 ```
 
-### 2. Confirm the anchor appears in the main ruleset
+**Confirm the anchor appears in the main ruleset:**
 
 ```bash
 sudo pfctl -sr | grep tailscale
@@ -123,23 +133,17 @@ Expected output:
 anchor "tailscale" all
 ```
 
-### 3. Test Tailscale connectivity
+**Test Tailscale connectivity:**
 
 ```bash
-# Ping a Tailscale host
 tailscale ping <hostname>
-
-# Test Magic DNS
 dig +short @100.100.100.100 <hostname>.ts.net
-
-# Confirm Mullvad is still active
 curl https://am.i.mullvad.net/connected
 ```
 
-### 4. Confirm no DNS leak
+**Confirm no DNS leak:**
 
 ```bash
-# This should resolve via Mullvad's DNS, not your ISP
 dig +short whoami.akamai.net
 ```
 
@@ -190,7 +194,8 @@ tailscale status --json | grep -i tun
 | `install.sh` | Idempotent installer — copies anchor, patches pf.conf, reloads PF |
 | `uninstall.sh` | Removes anchor and pf.conf modifications, reloads PF |
 | `etc/pf.anchors/tailscale` | PF anchor rules allowing Tailscale CGNAT traffic on utun0 |
+| `verify.sh` | Checks that the anchor is correctly installed and loaded |
 
 ## License
 
-Public domain. Use however you want.
+[Unlicense](LICENSE) — public domain.
