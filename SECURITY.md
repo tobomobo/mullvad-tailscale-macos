@@ -46,6 +46,28 @@ sudo bash verify.sh --tailnet-target <peer> --magicdns-name <peer>.ts.net
 curl https://am.i.mullvad.net/connected
 ```
 
+## MagicDNS, Same-LAN Peers, And DERP
+
+MagicDNS resolves peer names to Tailscale addresses, not LAN addresses. That means a same-Wi-Fi connection to `host.ts.net` still depends on Tailscale traffic being allowed by PF.
+
+This repo fixes that PF-layer problem, but it does not force Tailscale to use a direct local path. Once Tailscale traffic is allowed, path selection is still up to Tailscale. Depending on local network conditions, Tailscale may use:
+
+- a direct local peer path
+- or a DERP relay
+
+So a result like this:
+
+- MagicDNS resolves correctly
+- `tailscale ping` succeeds
+- Mullvad remains connected
+- but the ping goes `via DERP`
+
+means the workaround is functioning, but direct peer discovery or UDP reachability is still failing for some other reason. In other words:
+
+- DNS resolution worked
+- the PF exception worked
+- the remaining problem is direct Tailscale path establishment
+
 ## Failure Modes And Limits
 
 This repo reduces risk, but it does not remove all operational risk.

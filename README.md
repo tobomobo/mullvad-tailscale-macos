@@ -116,6 +116,24 @@ dig +short @100.100.100.100 <hostname>.ts.net
 curl https://am.i.mullvad.net/connected
 ```
 
+## Same Wi-Fi, MagicDNS, and Direct Connections
+
+If two devices are on the same Wi-Fi:
+
+- connecting by LAN IP such as `192.168.x.x` is usually already allowed by Mullvad's local-network rules
+- connecting by MagicDNS (`*.ts.net`) or a Tailscale IP (`100.x` / `fd7a:`) still uses Tailscale addressing, so this PF anchor is still needed
+
+MagicDNS only resolves the name to the peer's Tailscale address. It does not decide whether Tailscale will use a direct local peer path or a DERP relay.
+
+So a result like this:
+
+- `dig @100.100.100.100` returns the correct `100.x` address
+- `tailscale ping` succeeds
+- Mullvad still reports connected
+- but `tailscale ping` says `via DERP`
+
+means the PF fix is working and MagicDNS is working. The remaining issue is direct-path establishment between the two Tailscale peers, not the firewall exception or DNS resolution.
+
 ## Maintenance
 
 After major macOS updates, confirm that both managed lines still exist in `/etc/pf.conf`:
