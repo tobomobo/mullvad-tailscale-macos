@@ -90,7 +90,7 @@ This repo exists for people who intentionally want to keep the standalone Mullva
 
 - you may already have a Mullvad subscription and want to keep using it
 - Tailscale's own Mullvad docs note that Tailscale manages Mullvad accounts on the user's behalf and knows which Mullvad accounts belong to which Tailscale users, which is a different privacy model from using Mullvad directly
-- [Mullvad](https://mullvad.net/en/pricing) supports privacy-friendly payment methods such as cash and Monero, while Tailscale's documented [self-serve paid checkout](https://tailscale.com/kb/1251/pricing-faq) uses a credit card; Tailscale also documents other billing paths such as invoicing for some plans, but that is a different workflow
+- [Mullvad](https://mullvad.net/en/pricing) supports privacy-friendly payment methods such as cash and Monero, and Mullvad also announced support for [Bitcoin via Lightning](https://mullvad.net/en/blog/lightning-payments); by contrast, Tailscale's documented [self-serve paid checkout](https://tailscale.com/kb/1251/pricing-faq) uses a credit card, though Tailscale also documents other billing paths such as invoicing for some plans
 - the [Mullvad app](https://mullvad.net/en/help/using-mullvad-vpn-app/) offers app-level features such as [DAITA](https://mullvad.net/en/blog/defense-against-ai-guided-traffic-analysis-daita-now-available-on-linux-and-macos) and multihop; Tailscale's Mullvad integration is an exit-node product, not the Mullvad desktop app
 
 So the short version is:

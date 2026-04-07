@@ -75,7 +75,7 @@ As of April 7, 2026:
 - Tailscale documents the Mullvad integration as a separately purchased add-on
 - Tailscale documents that, when you use Mullvad with Tailscale, Tailscale generates and manages Mullvad accounts on users' behalf and knows which Mullvad accounts belong to which Tailscale users
 - Tailscale documents [self-serve paid checkout with credit-card billing](https://tailscale.com/kb/1251/pricing-faq), while also documenting invoice-based options for some plans via sales/support workflows
-- Mullvad documents [privacy-oriented direct payment options](https://mullvad.net/en/pricing) including cash and Monero
+- Mullvad documents [privacy-oriented direct payment options](https://mullvad.net/en/pricing) including cash and Monero, and Mullvad separately announced support for [Bitcoin Lightning payments](https://mullvad.net/en/blog/lightning-payments)
 - Mullvad documents [DAITA and multihop](https://mullvad.net/en/help/using-mullvad-vpn-app/) as features of the Mullvad app itself
 
 For this repo, that leads to a simple tradeoff:
