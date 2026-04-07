@@ -1,0 +1,7 @@
+# Tailscale CGNAT range — allow traffic on Tailscale's tunnel interface
+# so it is not blocked by Mullvad's PF kill switch.
+
+pass out quick on utun0 inet from any to 100.64.0.0/10 no state
+pass in quick on utun0 inet from 100.64.0.0/10 to any no state
+pass out quick on utun0 inet6 from any to fd7a:115c:a1e0::/48 no state
+pass in quick on utun0 inet6 from fd7a:115c:a1e0::/48 to any no state
