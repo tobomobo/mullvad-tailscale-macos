@@ -68,6 +68,8 @@ means the workaround is functioning, but direct peer discovery or UDP reachabili
 - the PF exception worked
 - the remaining problem is direct Tailscale path establishment
 
+This is also why the repo's active verifier should treat "TSMP reachability works, but DISCO direct path failed" as a warning rather than a hard failure. A DERP fallback means tailnet connectivity still works; it does not mean the PF fix failed.
+
 ## Failure Modes And Limits
 
 This repo reduces risk, but it does not remove all operational risk.

@@ -142,7 +142,13 @@ EOF
   cat > "$bin_dir/tailscale" <<'EOF'
 #!/bin/bash
 if [[ "${1:-}" == "ping" ]]; then
-  exit "${TAILSCALE_PING_EXIT:-0}"
+  if [[ " $* " == *" --tsmp "* ]]; then
+    printf '%s\n' "${TAILSCALE_TSMP_OUTPUT:-}"
+    exit "${TAILSCALE_TSMP_EXIT:-0}"
+  fi
+
+  printf '%s\n' "${TAILSCALE_DISCO_OUTPUT:-}"
+  exit "${TAILSCALE_DISCO_EXIT:-0}"
 fi
 
 exit 0
@@ -368,9 +374,49 @@ EOF
   PGREP_MULLVAD_EXIT=0 \
   CURL_OUTPUT="You are connected to Mullvad" \
   DIG_OUTPUT="100.110.111.112" \
+  TAILSCALE_TSMP_EXIT=0 \
+  TAILSCALE_DISCO_EXIT=0 \
   run_verify_env "$workspace" --tailnet-target peer --magicdns-name peer.ts.net
 
   pass "verify supports active tailnet, MagicDNS, and Mullvad checks"
+}
+
+test_verify_accepts_derp_fallback_as_reachable() {
+  local workspace
+  workspace="$(new_workspace verify-derp)"
+
+  cat > "$workspace/pf.conf" <<EOF
+set skip on lo0
+anchor "tailscale"
+load anchor "tailscale" from "$workspace/pf.anchors/tailscale"
+EOF
+
+  cat > "$workspace/pf.anchors/tailscale" <<'EOF'
+pass out quick on utun7 inet from any to 100.64.0.0/10 no state
+pass in quick on utun7 inet from 100.64.0.0/10 to any no state
+pass out quick on utun7 inet6 from any to fd7a:115c:a1e0::/48 no state
+pass in quick on utun7 inet6 from fd7a:115c:a1e0::/48 to any no state
+EOF
+
+  cat > "$workspace/ifconfig/utun7" <<'EOF'
+utun7: flags=8051<UP,POINTOPOINT,RUNNING,MULTICAST> mtu 1280
+	inet 100.82.1.2 --> 100.82.1.2 netmask 0xffffffff
+EOF
+
+  touch "$workspace/com.tailscale.tailscaled.plist"
+
+  IFCONFIG_LIST="lo0 utun7" \
+  PGREP_TAILSCALED_EXIT=0 \
+  PGREP_MULLVAD_EXIT=0 \
+  CURL_OUTPUT="You are connected to Mullvad" \
+  DIG_OUTPUT="100.110.111.112" \
+  TAILSCALE_TSMP_EXIT=0 \
+  TAILSCALE_DISCO_EXIT=1 \
+  TAILSCALE_DISCO_OUTPUT="pong from peer (100.110.111.112) via DERP(fra) in 40ms
+direct connection not established" \
+  run_verify_env "$workspace" --tailnet-target peer --magicdns-name peer.ts.net
+
+  pass "verify treats DERP fallback as reachable and reports direct-path failure as a warning"
 }
 
 test_daemon_installer_bootstraps_launchdaemon() {
@@ -404,6 +450,7 @@ test_install_rolls_back_failed_pf_reload
 test_uninstall_removes_anchor_block_and_file
 test_verify_rejects_partial_pf_conf
 test_verify_supports_active_checks
+test_verify_accepts_derp_fallback_as_reachable
 test_daemon_installer_bootstraps_launchdaemon
 test_daemon_uninstaller_boots_out_and_removes_plist
 

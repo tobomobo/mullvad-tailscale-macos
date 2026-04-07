@@ -21,7 +21,7 @@ usage() {
 Usage: bash verify.sh [--interface utunX] [--tailnet-target host] [--magicdns-name name.ts.net] [--no-mullvad-check]
 
 Performs configuration checks plus optional active validation:
-  --tailnet-target  Run 'tailscale ping --c 1 --timeout 5s' against a tailnet peer.
+  --tailnet-target  Run a TSMP reachability check plus a DISCO direct-path probe against a tailnet peer.
   --magicdns-name   Resolve a MagicDNS name directly via 100.100.100.100.
   --no-mullvad-check Skip the curl check against https://am.i.mullvad.net/connected.
 EOF
@@ -154,10 +154,18 @@ fi
 
 echo "6. Active checks"
 if [[ -n "$TAILNET_TARGET" ]]; then
-  if "$TAILSCALE_BIN" ping --c 1 --timeout 5s "$TAILNET_TARGET" >/dev/null 2>&1; then
-    pass "tailscale ping succeeded for $TAILNET_TARGET"
+  if tsmp_output="$("$TAILSCALE_BIN" ping --tsmp --c 1 --timeout 5s "$TAILNET_TARGET" 2>&1)"; then
+    pass "TSMP ping succeeded for $TAILNET_TARGET"
   else
-    fail "tailscale ping failed for $TAILNET_TARGET"
+    fail "TSMP ping failed for $TAILNET_TARGET"
+  fi
+
+  if disco_output="$("$TAILSCALE_BIN" ping --c 3 --timeout 5s "$TAILNET_TARGET" 2>&1)"; then
+    pass "Direct or peer-routed DISCO path established for $TAILNET_TARGET"
+  elif grep -qi "direct connection not established" <<<"$disco_output" || grep -qi "via DERP" <<<"$disco_output"; then
+    warn "Tailnet reachability works, but no direct DISCO path was established for $TAILNET_TARGET; Tailscale is falling back to DERP"
+  else
+    warn "Unable to confirm a direct DISCO path for $TAILNET_TARGET"
   fi
 else
   warn "No --tailnet-target provided; skipping active tailnet connectivity check"

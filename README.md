@@ -67,6 +67,13 @@ For active end-to-end checks:
 sudo bash verify.sh --tailnet-target <peer> --magicdns-name <peer>.ts.net
 ```
 
+When `--tailnet-target` is provided, `verify.sh` now checks two different things:
+
+- Tailscale reachability over the tailnet
+- whether Tailscale could also establish a direct DISCO path instead of falling back to DERP
+
+So "peer reachable, but via DERP" is treated as a working tailnet connection with a warning about direct-path establishment, not as a failed install.
+
 ## What The Scripts Do
 
 - `install.sh`
@@ -111,6 +118,7 @@ Useful manual checks:
 ```bash
 sudo pfctl -a tailscale -sr
 sudo pfctl -sr | grep 'anchor "tailscale"'
+tailscale ping --tsmp <hostname>
 tailscale ping <hostname>
 dig +short @100.100.100.100 <hostname>.ts.net
 curl https://am.i.mullvad.net/connected
