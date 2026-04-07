@@ -15,7 +15,7 @@ labels: macos-update
 
 
 **Output of `sudo pfctl -sr`:**
-<!-- Paste full output. This shows the active PF ruleset. -->
+<!-- Paste the relevant tailscale/mullvad rules if possible. Redact public IPs, hostnames, or unrelated local subnets before posting. -->
 
 ```
 
@@ -29,7 +29,7 @@ labels: macos-update
 ```
 
 **Contents of `/etc/pf.conf`:**
-<!-- Check whether the anchor lines are still present. macOS updates can reset this file. -->
+<!-- Paste only the tailscale anchor block and nearby lines if possible. Redact unrelated rules, hostnames, and local addressing before posting. -->
 
 ```
 

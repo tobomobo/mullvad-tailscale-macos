@@ -30,45 +30,25 @@ mullvad dns set default              # Use Mullvad's DNS (no custom DNS that cou
 
 ### Tailscale
 
-Homebrew's `tailscale` formula only installs the binaries — it doesn't install a system-level daemon. To make `tailscaled` start at boot (without logging into any user account), a custom LaunchDaemon is used instead of `brew services`.
+Homebrew's `tailscale` formula only installs the binaries. If you want `tailscaled` to run at boot regardless of user login, this repo now includes a LaunchDaemon installer that detects the current `tailscaled` binary path and uses the modern `launchctl bootstrap` workflow.
 
-**Create the plist:**
+**Install the LaunchDaemon:**
 
 ```bash
-sudo tee /Library/LaunchDaemons/com.tailscale.tailscaled.plist > /dev/null <<'EOF'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>com.tailscale.tailscaled</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>/opt/homebrew/bin/tailscaled</string>
-    </array>
-    <key>RunAtLoad</key>
-    <true/>
-    <key>KeepAlive</key>
-    <true/>
-    <key>StandardOutPath</key>
-    <string>/var/log/tailscaled.log</string>
-    <key>StandardErrorPath</key>
-    <string>/var/log/tailscaled.err</string>
-</dict>
-</plist>
-EOF
+sudo bash install-tailscaled-daemon.sh
 ```
 
-**Load it and authenticate:**
+**Authenticate the node:**
 
 ```bash
-sudo launchctl load /Library/LaunchDaemons/com.tailscale.tailscaled.plist
 tailscale up
 ```
 
-This runs `tailscaled` as root via launchd with `RunAtLoad` (starts at boot) and `KeepAlive` (restarts if it crashes). Logs go to `/var/log/tailscaled.log` and `/var/log/tailscaled.err`.
+This runs `tailscaled` as root via launchd with `RunAtLoad` and `KeepAlive`. The generated LaunchDaemon writes logs to `/var/log/tailscaled.log` and `/var/log/tailscaled.err`.
 
-Why not `brew services start tailscale`? Brew services installs a LaunchAgent under the current user, which only runs when that user is logged in. A LaunchDaemon in `/Library/LaunchDaemons/` runs at boot regardless of who (if anyone) is logged in.
+If you already manage `tailscaled` some other way, you can skip this step. The PF anchor fix only requires that Tailscale be running and authenticated.
+
+Why not `brew services start tailscale`? Brew services installs a LaunchAgent under the current user, which only runs when that user is logged in. A LaunchDaemon in `/Library/LaunchDaemons/` runs at boot regardless of who, if anyone, is logged in.
 
 **Optional — set an operator user:**
 
@@ -105,7 +85,7 @@ So even if you add Tailscale to Mullvad's split tunneling list, it has no effect
 
 ## The fix
 
-We add a **PF anchor** — a named sub-ruleset — that explicitly passes Tailscale traffic on `utun0` (Tailscale's tunnel interface) before Mullvad's rules get a chance to drop it.
+We add a **PF anchor** — a named sub-ruleset — that explicitly passes Tailscale traffic on Tailscale's active `utun` interface before Mullvad's rules get a chance to drop it.
 
 ### What is a PF anchor?
 
@@ -117,11 +97,11 @@ The `quick` keyword on our rules means "if this rule matches, stop evaluating �
 
 Mullvad injects its PF rules dynamically at runtime using `pfctl`. It does **not** flush the base ruleset loaded from `/etc/pf.conf`. Our anchor is part of the base ruleset, so it persists across Mullvad connects, disconnects, and reconnects.
 
-### Why this doesn't cause DNS leaks
+### Why this should not create a DNS leak
 
-Mullvad's PF rules restrict DNS (port 53) to only pass through Mullvad's tunnel interface to Mullvad's DNS server (typically `10.64.0.1` on `utun9`). Our anchor only passes traffic on `utun0` (Tailscale's interface) to the CGNAT range. It does not touch port 53 rules, does not modify Mullvad's DNS configuration, and does not allow arbitrary DNS traffic to leak outside the VPN tunnel.
+Mullvad's PF rules restrict DNS (port 53) to only pass through Mullvad's tunnel interface to Mullvad's DNS server. Our anchor only passes traffic on Tailscale's active `utun` interface to Tailscale's CGNAT and IPv6 ULA ranges. It does not open arbitrary destinations, does not change Mullvad's DNS configuration, and does not alter browser or app-level DNS settings.
 
-Magic DNS queries to `100.100.100.100` are resolved by Tailscale's local DNS proxy and travel over the Tailscale tunnel — they never leave `utun0`.
+Magic DNS queries to `100.100.100.100` are resolved by Tailscale's local DNS proxy and travel over the Tailscale tunnel. That is why this PF exception is expected to be leak-safe, but you should still verify your own system state with Mullvad's connection check after installation.
 
 ## Installation
 
@@ -131,25 +111,34 @@ cd mullvad-tailscale-macos
 sudo bash install.sh
 ```
 
-The install script is idempotent — running it multiple times is safe.
+The install script auto-detects Tailscale's active `utun` interface. If Tailscale is not running yet, pass the interface explicitly:
+
+```bash
+sudo bash install.sh --interface utun3
+```
+
+The install script is designed to be idempotent: it repairs partial anchor blocks, refreshes the runtime anchor when `pf.conf` is already correct, validates staged changes before reload, and restores the original `pf.conf` if PF rejects the update.
 
 ### What it does
 
-1. Copies `etc/pf.anchors/tailscale` to `/etc/pf.anchors/tailscale`.
-2. Backs up `/etc/pf.conf` to `/etc/pf.conf.bak.<timestamp>`.
-3. Appends the anchor reference and load directive to `/etc/pf.conf` (if not already present).
-4. Reloads PF with `pfctl -f /etc/pf.conf`.
+1. Detects Tailscale's active `utun` interface, or uses `--interface`.
+2. Renders `etc/pf.anchors/tailscale` for that interface and installs it to `/etc/pf.anchors/tailscale`.
+3. Repairs the exact anchor block in `/etc/pf.conf` if either line is missing.
+4. Validates the staged `pf.conf` before reloading PF.
+5. Backs up `/etc/pf.conf` to `/etc/pf.conf.bak.<timestamp>`.
+6. Reloads PF only when `pf.conf` changed; otherwise it refreshes just the runtime anchor.
+7. Restores the original `pf.conf` automatically if PF rejects the new config.
 
 ### The anchor rules
 
-```
-pass out quick on utun0 inet from any to 100.64.0.0/10 no state
-pass in quick on utun0 inet from 100.64.0.0/10 to any no state
-pass out quick on utun0 inet6 from any to fd7a:115c:a1e0::/48 no state
-pass in quick on utun0 inet6 from fd7a:115c:a1e0::/48 to any no state
+```text
+pass out quick on <tailscale-utun> inet from any to 100.64.0.0/10 no state
+pass in quick on <tailscale-utun> inet from 100.64.0.0/10 to any no state
+pass out quick on <tailscale-utun> inet6 from any to fd7a:115c:a1e0::/48 no state
+pass in quick on <tailscale-utun> inet6 from fd7a:115c:a1e0::/48 to any no state
 ```
 
-- `utun0` — Tailscale's tunnel interface on macOS.
+- `<tailscale-utun>` — Tailscale's active tunnel interface on macOS.
 - `100.64.0.0/10` — the CGNAT range used by Tailscale for IPv4.
 - `fd7a:115c:a1e0::/48` — Tailscale's IPv6 ULA range.
 - `quick` — match immediately, skip remaining rules.
@@ -168,7 +157,13 @@ load anchor "tailscale" from "/etc/pf.anchors/tailscale"
 sudo bash uninstall.sh
 ```
 
-This removes the anchor file, strips the anchor lines from `pf.conf` (after backing it up), and reloads PF.
+This removes the anchor file, strips the anchor lines from `pf.conf` (after backing it up), and reloads PF when the managed block was present.
+
+If you used the repo-managed Tailscale LaunchDaemon, remove that separately:
+
+```bash
+sudo bash uninstall-tailscaled-daemon.sh
+```
 
 ## Verification
 
@@ -180,7 +175,19 @@ After installing, verify with these commands:
 sudo bash verify.sh
 ```
 
-This checks the anchor file, pf.conf references, PF runtime state, interface assignment, and whether both daemons are running.
+This checks the anchor file, exact `pf.conf` references, PF runtime state, interface assignment, the daemon state for both tools, and the presence of the repo-managed LaunchDaemon plist.
+
+To run active end-to-end checks as well:
+
+```bash
+sudo bash verify.sh --tailnet-target <peer> --magicdns-name <peer>.ts.net
+```
+
+That adds:
+
+- `tailscale ping --c 1 --timeout 5s <peer>`
+- a direct MagicDNS lookup via `100.100.100.100`
+- a Mullvad tunnel check using `curl https://am.i.mullvad.net/connected`
 
 ### Manual checks
 
@@ -192,17 +199,17 @@ sudo pfctl -a tailscale -sr
 
 Expected output:
 
-```
-pass out quick on utun0 inet from any to 100.64.0.0/10 no state
-pass in quick on utun0 inet from 100.64.0.0/10 to any no state
-pass out quick on utun0 inet6 from any to fd7a:115c:a1e0::/48 no state
-pass in quick on utun0 inet6 from fd7a:115c:a1e0::/48 to any no state
+```text
+pass out quick on <tailscale-utun> inet from any to 100.64.0.0/10 no state
+pass in quick on <tailscale-utun> inet from 100.64.0.0/10 to any no state
+pass out quick on <tailscale-utun> inet6 from any to fd7a:115c:a1e0::/48 no state
+pass in quick on <tailscale-utun> inet6 from fd7a:115c:a1e0::/48 to any no state
 ```
 
 **Confirm the anchor appears in the main ruleset:**
 
 ```bash
-sudo pfctl -sr | grep tailscale
+sudo pfctl -sr | grep 'anchor "tailscale"'
 ```
 
 Expected output:
@@ -219,7 +226,7 @@ dig +short @100.100.100.100 <hostname>.ts.net
 curl https://am.i.mullvad.net/connected
 ```
 
-**Confirm no DNS leak:**
+**Confirm no obvious leak:**
 
 ```bash
 dig +short whoami.akamai.net
@@ -237,7 +244,8 @@ Major macOS updates (e.g., Ventura → Sonoma) can **reset `/etc/pf.conf`** to t
 
 ```bash
 # Check if the anchor lines are still present
-grep tailscale /etc/pf.conf
+grep -Fx 'anchor "tailscale"' /etc/pf.conf
+grep -Fx 'load anchor "tailscale" from "/etc/pf.anchors/tailscale"' /etc/pf.conf
 
 # If not, re-run the installer
 sudo bash install.sh
@@ -255,7 +263,7 @@ Mullvad injects its PF rules dynamically and does not modify `/etc/pf.conf`. Upd
 
 ### Interface name changes
 
-This fix assumes Tailscale uses `utun0`. If macOS assigns a different `utun` interface to Tailscale (uncommon but possible if other VPNs claim `utun0` first), you'll need to update the interface name in `/etc/pf.anchors/tailscale`.
+This fix no longer assumes `utun0`, but it still depends on targeting the correct active Tailscale `utun` interface. If Tailscale is not running when you install, the script cannot auto-detect the interface and you must pass `--interface`.
 
 To check which interface Tailscale is using:
 
@@ -269,10 +277,14 @@ tailscale status --json | grep -i tun
 
 | File | Purpose |
 |------|---------|
-| `install.sh` | Idempotent installer — copies anchor, patches pf.conf, reloads PF |
-| `uninstall.sh` | Removes anchor and pf.conf modifications, reloads PF |
-| `etc/pf.anchors/tailscale` | PF anchor rules allowing Tailscale CGNAT traffic on utun0 |
-| `verify.sh` | Checks that the anchor is correctly installed and loaded |
+| `install.sh` | Detects the active Tailscale interface, renders the anchor, validates PF changes, and reloads or refreshes PF safely |
+| `uninstall.sh` | Removes the managed anchor block, reloads PF with rollback protection, and deletes the installed anchor file |
+| `install-tailscaled-daemon.sh` | Installs a system LaunchDaemon for `tailscaled` using `launchctl bootstrap` |
+| `uninstall-tailscaled-daemon.sh` | Removes the repo-managed `tailscaled` LaunchDaemon |
+| `etc/pf.anchors/tailscale` | Template used to render interface-specific PF anchor rules |
+| `lib/common.sh` | Shared helpers for interface detection, exact-line matching, rollback-safe PF updates, and LaunchDaemon management |
+| `verify.sh` | Checks configuration plus optional active Tailscale, MagicDNS, and Mullvad connectivity |
+| `tests/run.sh` | Local smoke tests for install, uninstall, verify, rollback, and LaunchDaemon management |
 
 ## License
 

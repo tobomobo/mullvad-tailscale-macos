@@ -1,62 +1,69 @@
 #!/bin/bash
 set -euo pipefail
 
-# Install PF anchor to allow Tailscale traffic alongside Mullvad VPN.
-# Must be run with sudo.
-
-if [[ $EUID -ne 0 ]]; then
-  echo "Error: This script must be run with sudo." >&2
-  exit 1
-fi
-
-ANCHOR_FILE="/etc/pf.anchors/tailscale"
-PF_CONF="/etc/pf.conf"
-ANCHOR_LINE='anchor "tailscale"'
-LOAD_LINE='load anchor "tailscale" from "/etc/pf.anchors/tailscale"'
-
-# --- Install the anchor rules file ---
-
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-SOURCE_ANCHOR="$SCRIPT_DIR/etc/pf.anchors/tailscale"
+source "$SCRIPT_DIR/lib/common.sh"
 
-if [[ ! -f "$SOURCE_ANCHOR" ]]; then
-  echo "Error: Cannot find anchor rules at $SOURCE_ANCHOR" >&2
-  exit 1
+usage() {
+  cat <<EOF
+Usage: sudo bash install.sh [--interface utunX]
+
+Installs or updates the PF anchor that lets Tailscale traffic pass alongside
+Mullvad's PF-based kill switch. By default the script auto-detects the active
+Tailscale utun interface from the current ifconfig output.
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --interface)
+      [[ $# -ge 2 ]] || die "--interface requires a value."
+      TAILSCALE_INTERFACE="$2"
+      shift 2
+      ;;
+    --help|-h)
+      usage
+      exit 0
+      ;;
+    *)
+      usage >&2
+      exit 1
+      ;;
+  esac
+done
+
+require_root
+
+if [[ ! -f "$ANCHOR_TEMPLATE" ]]; then
+  die "Cannot find anchor template at $ANCHOR_TEMPLATE"
 fi
 
-echo "Installing anchor rules to $ANCHOR_FILE ..."
-cp "$SOURCE_ANCHOR" "$ANCHOR_FILE"
-chown root:wheel "$ANCHOR_FILE"
-chmod 644 "$ANCHOR_FILE"
+interface="$(detect_tailscale_interface)" || die "Unable to detect Tailscale's utun interface. Start Tailscale first or rerun with --interface utunX."
+tmp_anchor="$(make_temp_file tailscale-anchor)"
+tmp_pf_conf="$(make_temp_file pf-conf)"
+trap 'rm -f "$tmp_anchor" "$tmp_pf_conf"' EXIT
 
-# --- Validate the anchor file syntax ---
+render_anchor_template "$ANCHOR_TEMPLATE" "$tmp_anchor" "$interface"
+validate_anchor_file "$tmp_anchor" || die "Rendered anchor file has syntax errors."
 
-if ! pfctl -n -f "$ANCHOR_FILE" 2>/dev/null; then
-  echo "Error: Anchor file has syntax errors." >&2
-  exit 1
-fi
+echo "Installing anchor rules for $interface to $ANCHOR_FILE ..."
+install_root_owned_file "$tmp_anchor" "$ANCHOR_FILE"
 
-# --- Add anchor to pf.conf (idempotent) ---
+ensure_anchor_block "$PF_CONF" "$tmp_pf_conf"
 
-if grep -qF "$ANCHOR_LINE" "$PF_CONF"; then
-  echo "Anchor reference already present in $PF_CONF, skipping."
+if file_differs "$PF_CONF" "$tmp_pf_conf"; then
+  validate_pf_conf "$tmp_pf_conf" || die "Updated pf.conf failed validation."
+  echo "Applying PF config update ..."
+  backup_path="$(apply_pf_conf_update "$tmp_pf_conf")" || die "Failed to reload PF after updating $PF_CONF. Original config was restored."
+  echo "Backed up $PF_CONF to $backup_path"
 else
-  echo "Backing up $PF_CONF to ${PF_CONF}.bak.$(date +%Y%m%d%H%M%S) ..."
-  cp "$PF_CONF" "${PF_CONF}.bak.$(date +%Y%m%d%H%M%S)"
-
-  echo "Adding anchor to $PF_CONF ..."
-  printf '\n# Tailscale anchor — allow CGNAT range through Mullvad kill switch\n%s\n%s\n' \
-    "$ANCHOR_LINE" "$LOAD_LINE" >> "$PF_CONF"
+  echo "pf.conf already contains the exact anchor block. Refreshing runtime anchor only ..."
+  load_runtime_anchor "$ANCHOR_FILE" || die "Failed to refresh runtime anchor rules."
 fi
-
-# --- Load the rules ---
-
-echo "Loading PF rules ..."
-pfctl -f "$PF_CONF" 2>/dev/null
 
 echo ""
 echo "Done. Verifying anchor is loaded:"
-pfctl -a tailscale -sr 2>/dev/null
+"$PFCTL_BIN" -a "$TAILSCALE_ANCHOR_NAME" -sr 2>/dev/null || true
 
 echo ""
-echo "Tailscale traffic should now pass through Mullvad's kill switch."
+echo "Tailscale traffic should now pass through Mullvad's kill switch on $interface."

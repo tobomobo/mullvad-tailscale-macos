@@ -1,7 +1,8 @@
-# Tailscale CGNAT range — allow traffic on Tailscale's tunnel interface
-# so it is not blocked by Mullvad's PF kill switch.
+# Template rendered by install.sh.
+# If you are installing manually, replace __TAILSCALE_INTERFACE__ with the
+# active utun interface that Tailscale is currently using.
 
-pass out quick on utun0 inet from any to 100.64.0.0/10 no state
-pass in quick on utun0 inet from 100.64.0.0/10 to any no state
-pass out quick on utun0 inet6 from any to fd7a:115c:a1e0::/48 no state
-pass in quick on utun0 inet6 from fd7a:115c:a1e0::/48 to any no state
+pass out quick on __TAILSCALE_INTERFACE__ inet from any to 100.64.0.0/10 no state
+pass in quick on __TAILSCALE_INTERFACE__ inet from 100.64.0.0/10 to any no state
+pass out quick on __TAILSCALE_INTERFACE__ inet6 from any to fd7a:115c:a1e0::/48 no state
+pass in quick on __TAILSCALE_INTERFACE__ inet6 from fd7a:115c:a1e0::/48 to any no state

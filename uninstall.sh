@@ -1,44 +1,54 @@
 #!/bin/bash
 set -euo pipefail
 
-# Remove the Tailscale PF anchor and restore pf.conf.
-# Must be run with sudo.
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "$SCRIPT_DIR/lib/common.sh"
 
-if [[ $EUID -ne 0 ]]; then
-  echo "Error: This script must be run with sudo." >&2
-  exit 1
+usage() {
+  cat <<EOF
+Usage: sudo bash uninstall.sh
+
+Removes the managed PF anchor block from pf.conf, reloads PF if needed, and
+deletes the installed anchor file after the firewall update succeeds.
+EOF
+}
+
+if [[ $# -gt 0 ]]; then
+  case "$1" in
+    --help|-h)
+      usage
+      exit 0
+      ;;
+    *)
+      usage >&2
+      exit 1
+      ;;
+  esac
 fi
 
-ANCHOR_FILE="/etc/pf.anchors/tailscale"
-PF_CONF="/etc/pf.conf"
+require_root
 
-# --- Remove anchor from pf.conf ---
+tmp_pf_conf="$(make_temp_file pf-conf)"
+trap 'rm -f "$tmp_pf_conf"' EXIT
 
-if grep -qF 'anchor "tailscale"' "$PF_CONF"; then
-  echo "Backing up $PF_CONF to ${PF_CONF}.bak.$(date +%Y%m%d%H%M%S) ..."
-  cp "$PF_CONF" "${PF_CONF}.bak.$(date +%Y%m%d%H%M%S)"
+remove_anchor_block "$PF_CONF" "$tmp_pf_conf"
 
-  echo "Removing Tailscale anchor lines from $PF_CONF ..."
-  sed -i '' '/# Tailscale anchor/d' "$PF_CONF"
-  sed -i '' '/anchor "tailscale"/d' "$PF_CONF"
-  sed -i '' '\|load anchor "tailscale"|d' "$PF_CONF"
+if file_differs "$PF_CONF" "$tmp_pf_conf"; then
+  validate_pf_conf "$tmp_pf_conf" || die "Updated pf.conf failed validation."
+  echo "Removing managed anchor block from $PF_CONF ..."
+  backup_path="$(apply_pf_conf_update "$tmp_pf_conf")" || die "Failed to reload PF after updating $PF_CONF. Original config was restored."
+  echo "Backed up $PF_CONF to $backup_path"
 else
-  echo "No Tailscale anchor found in $PF_CONF, skipping."
+  echo "Managed anchor block is already absent from $PF_CONF."
+  flush_runtime_anchor || true
 fi
-
-# --- Remove anchor file ---
 
 if [[ -f "$ANCHOR_FILE" ]]; then
   echo "Removing $ANCHOR_FILE ..."
-  rm "$ANCHOR_FILE"
+  "$RM_BIN" "$ANCHOR_FILE"
 else
   echo "Anchor file $ANCHOR_FILE not found, skipping."
 fi
-
-# --- Reload PF ---
-
-echo "Reloading PF rules ..."
-pfctl -f "$PF_CONF" 2>/dev/null
 
 echo ""
 echo "Done. Tailscale anchor has been removed."
