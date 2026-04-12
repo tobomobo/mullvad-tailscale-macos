@@ -605,6 +605,82 @@ ip_address: 100.110.111.112" \
   pass "verify warns when /etc/hosts masks MagicDNS"
 }
 
+test_verify_accepts_externally_managed_tailscaled() {
+  local workspace
+  workspace="$(new_workspace verify-external-tailscaled)"
+
+  cat > "$workspace/pf.conf" <<EOF
+set skip on lo0
+anchor "tailscale"
+load anchor "tailscale" from "$workspace/pf.anchors/tailscale"
+EOF
+
+  cat > "$workspace/pf.anchors/tailscale" <<'EOF'
+pass out quick on utun7 inet from any to 100.64.0.0/10 no state
+pass in quick on utun7 inet from 100.64.0.0/10 to any no state
+pass out quick on utun7 inet6 from any to fd7a:115c:a1e0::/48 no state
+pass in quick on utun7 inet6 from fd7a:115c:a1e0::/48 to any no state
+EOF
+
+  cat > "$workspace/ifconfig/utun7" <<'EOF'
+utun7: flags=8051<UP,POINTOPOINT,RUNNING,MULTICAST> mtu 1280
+	inet 100.82.1.2 --> 100.82.1.2 netmask 0xffffffff
+EOF
+
+  output="$(
+    IFCONFIG_LIST="lo0 utun7" \
+    PGREP_TAILSCALED_EXIT=0 \
+    PGREP_MULLVAD_EXIT=0 \
+    CURL_OUTPUT="You are connected to Mullvad" \
+    run_verify_env "$workspace"
+  )"
+
+  grep -Fq "tailscaled appears to be managed elsewhere" <<<"$output" || fail "Expected verify to accept externally managed tailscaled"
+  assert_file_not_contains <(printf '%s' "$output") "Managed tailscaled LaunchDaemon plist not found"
+  pass "verify accepts tailscaled managed outside the repo"
+}
+
+test_verify_followups_only_suggest_resolver_for_tailnet_domains() {
+  local workspace
+  workspace="$(new_workspace verify-followups-domain)"
+
+  cat > "$workspace/pf.conf" <<EOF
+set skip on lo0
+anchor "tailscale"
+load anchor "tailscale" from "$workspace/pf.anchors/tailscale"
+EOF
+
+  cat > "$workspace/pf.anchors/tailscale" <<'EOF'
+pass out quick on utun7 inet from any to 100.64.0.0/10 no state
+pass in quick on utun7 inet from 100.64.0.0/10 to any no state
+pass out quick on utun7 inet6 from any to fd7a:115c:a1e0::/48 no state
+pass in quick on utun7 inet6 from fd7a:115c:a1e0::/48 to any no state
+EOF
+
+  cat > "$workspace/ifconfig/utun7" <<'EOF'
+utun7: flags=8051<UP,POINTOPOINT,RUNNING,MULTICAST> mtu 1280
+	inet 100.82.1.2 --> 100.82.1.2 netmask 0xffffffff
+EOF
+
+  touch "$workspace/com.tailscale.tailscaled.plist"
+
+  output="$(
+    IFCONFIG_LIST="lo0 utun7" \
+    PGREP_TAILSCALED_EXIT=0 \
+    PGREP_MULLVAD_EXIT=0 \
+    CURL_OUTPUT="You are connected to Mullvad" \
+    DIG_OUTPUT="" \
+    DSCACHEUTIL_OUTPUT="" \
+    run_verify_env "$workspace" --magicdns-name peer.example.com || true
+  )"
+
+  grep -Fq "Follow up: scutil --dns" <<<"$output" || fail "Expected standard MagicDNS follow-up hints"
+  if grep -Fq "install-tailnet-resolver.sh" <<<"$output"; then
+    fail "Did not expect resolver installer hint for a non-tailnet domain"
+  fi
+  pass "verify only suggests the resolver helper for tailnet domains"
+}
+
 test_verify_warns_when_tailnet_resolver_override_is_missing() {
   local workspace
   workspace="$(new_workspace verify-missing-resolver)"
@@ -740,6 +816,8 @@ test_verify_accepts_derp_fallback_as_reachable
 test_verify_rejects_system_resolver_mismatch
 test_verify_rejects_missing_system_resolution
 test_verify_warns_on_hosts_override
+test_verify_accepts_externally_managed_tailscaled
+test_verify_followups_only_suggest_resolver_for_tailnet_domains
 test_verify_warns_when_tailnet_resolver_override_is_missing
 test_resolver_installer_writes_file_and_flushes_dns
 test_resolver_installer_refuses_unmanaged_existing_file

@@ -136,7 +136,6 @@ tailscale ping --tsmp <hostname>
 tailscale ping <hostname>
 dig +short @100.100.100.100 <hostname>.your-tailnet.ts.net
 dscacheutil -q host -a name <hostname>.your-tailnet.ts.net
-sudo cat /etc/resolver/your-tailnet.ts.net
 curl https://am.i.mullvad.net/connected
 ```
 
@@ -264,22 +263,6 @@ sudo bash install.sh
 ```
 
 If you want the full rationale for why this approach should be safe, where it can still fail, and how it compares to the Tailscale add-on, read [SECURITY.md](SECURITY.md).
-
-## File Overview
-
-| File | Purpose |
-|------|---------|
-| `install.sh` | Installs the PF anchor with interface detection and rollback-safe PF updates |
-| `uninstall.sh` | Removes the managed PF anchor block and installed anchor file |
-| `install-tailscaled-daemon.sh` | Installs a system LaunchDaemon for `tailscaled` |
-| `uninstall-tailscaled-daemon.sh` | Removes the repo-managed `tailscaled` LaunchDaemon |
-| `install-tailnet-resolver.sh` | Installs an optional domain-scoped MagicDNS resolver override |
-| `uninstall-tailnet-resolver.sh` | Removes the optional resolver override |
-| `etc/pf.anchors/tailscale` | Template used to render interface-specific PF anchor rules |
-| `lib/common.sh` | Shared helpers for PF and LaunchDaemon management |
-| `verify.sh` | Verifies configuration and optional active checks |
-| `tests/run.sh` | Stubbed smoke tests for install, uninstall, verify, rollback, and LaunchDaemon management |
-| `SECURITY.md` | Security model, tradeoffs, and product comparison notes |
 
 ## License
 

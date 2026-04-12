@@ -45,7 +45,7 @@ print_magicdns_followups() {
   echo "      Follow up: dscacheutil -q host -a name $hostname"
   echo "      Follow up: dig +short @$TAILSCALE_MAGICDNS_SERVER $hostname"
   echo "      Follow up: scutil --dns"
-  if [[ -n "$suggested_tailnet_domain" && "$suggested_tailnet_domain" != "$hostname" ]]; then
+  if [[ -n "$suggested_tailnet_domain" && "$suggested_tailnet_domain" != "$hostname" ]] && validate_tailnet_domain "$suggested_tailnet_domain"; then
     echo "      Optional: sudo bash install-tailnet-resolver.sh --tailnet-domain $suggested_tailnet_domain"
   fi
 }
@@ -158,7 +158,9 @@ else
 fi
 
 echo "5. Daemon state"
+tailscaled_running=0
 if "$PGREP_BIN" -q tailscaled 2>/dev/null; then
+  tailscaled_running=1
   pass "tailscaled is running"
 else
   warn "tailscaled is not running"
@@ -172,6 +174,8 @@ fi
 
 if [[ -f "$TAILSCALED_DAEMON_PLIST" ]]; then
   pass "Managed tailscaled LaunchDaemon plist exists"
+elif [[ "$tailscaled_running" -eq 1 ]]; then
+  pass "No repo-managed tailscaled LaunchDaemon plist found; tailscaled appears to be managed elsewhere"
 else
   warn "Managed tailscaled LaunchDaemon plist not found"
 fi
