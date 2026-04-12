@@ -4,7 +4,7 @@ This document describes the security model and tradeoffs of this workaround. It 
 
 ## What This Repo Changes
 
-This repo installs a PF anchor and adds the following two managed lines to `/etc/pf.conf`:
+This repo always installs a PF anchor and adds the following two managed lines to `/etc/pf.conf`:
 
 ```text
 anchor "tailscale"
@@ -27,6 +27,8 @@ That is intentionally narrow:
 - the rules are `quick`, so matching traffic stops before later Mullvad block rules
 - the rules use `no state`, so they do not interfere with Mullvad's own stateful tracking
 
+In the DNS edge case documented in this repo, it can also optionally install a domain-scoped `/etc/resolver/<tailnet>.ts.net` override that points macOS apps at Tailscale MagicDNS for that one tailnet domain.
+
 ## Why Split Tunneling Does Not Solve This
 
 Mullvad's split tunneling on macOS works through Network Extension content-filter behavior. `tailscaled` runs as a root-managed system daemon, and root processes are the important edge case here.
@@ -42,7 +44,7 @@ Magic DNS queries to `100.100.100.100` are expected to stay on Tailscale's tunne
 That said, "should be leak-safe" is the right level of confidence here. You should still verify your own machine after installation:
 
 ```bash
-sudo bash verify.sh --tailnet-target <peer> --magicdns-name <peer>.ts.net
+sudo bash verify.sh --tailnet-target <peer> --magicdns-name <peer>.your-tailnet.ts.net
 curl https://am.i.mullvad.net/connected
 ```
 
@@ -59,16 +61,16 @@ In practice, app-level hostname resolution can still be changed by:
 
 That means a result like this is possible:
 
-- `dig +short @100.100.100.100 host.ts.net` returns the correct Tailscale IP
-- but `dscacheutil -q host -a name host.ts.net` returns nothing or a different IP
+- `dig +short @100.100.100.100 host.your-tailnet.ts.net` returns the correct Tailscale IP
+- but `dscacheutil -q host -a name host.your-tailnet.ts.net` returns nothing or a different IP
 - or an app works only because `/etc/hosts` contains a static override
 
 When you are validating hostname access on macOS, check both layers:
 
 ```bash
-dig +short @100.100.100.100 <peer>.ts.net
-dscacheutil -q host -a name <peer>.ts.net
-grep -nF '<peer>.ts.net' /etc/hosts
+dig +short @100.100.100.100 <peer>.your-tailnet.ts.net
+dscacheutil -q host -a name <peer>.your-tailnet.ts.net
+grep -nF '<peer>.your-tailnet.ts.net' /etc/hosts
 scutil --dns
 ```
 
@@ -86,6 +88,33 @@ After changing `/etc/hosts` or `/etc/resolver/*`, flush caches:
 sudo dscacheutil -flushcache
 sudo killall -HUP mDNSResponder
 ```
+
+## Optional Tailnet Resolver Override
+
+Some Mullvad setups still leave normal macOS apps on the wrong DNS path for a tailnet domain even when:
+
+- Tailscale reachability works
+- direct MagicDNS queries to `100.100.100.100` are correct
+- the PF exception is already working
+
+For that case, this repo provides an optional domain-scoped resolver helper:
+
+```bash
+sudo bash install-tailnet-resolver.sh --tailnet-domain your-tailnet.ts.net
+```
+
+That writes `/etc/resolver/your-tailnet.ts.net` with:
+
+```text
+nameserver 100.100.100.100
+```
+
+This is materially different from `/etc/hosts`:
+
+- `/etc/hosts` hardcodes individual hostnames to fixed IPs
+- `/etc/resolver/your-tailnet.ts.net` sends the whole tailnet domain to MagicDNS, so IP assignments can still change normally
+
+This resolver override is system-wide, so once an admin installs it, non-admin users on the same Mac should benefit from it too. The helper installs it as a root-owned but readable file, which keeps the policy inspectable without making it user-writable.
 
 ## MagicDNS, Same-LAN Peers, And DERP
 
@@ -122,6 +151,7 @@ Things that can still go wrong:
 - Tailscale is not running when `install.sh` executes, so interface auto-detection fails
 - macOS reassigns Tailscale to a different `utun` interface later
 - a major macOS update resets `/etc/pf.conf`
+- a Mullvad or macOS DNS-path change makes tailnet hostnames unreliable until a domain-scoped resolver override is installed
 - live PF behavior on a given host differs from the stubbed smoke tests in this repo
 
 The repo tries to reduce those risks by:
@@ -130,7 +160,7 @@ The repo tries to reduce those risks by:
 - validating rendered anchor files before install
 - validating staged `pf.conf` before reload
 - restoring the previous `pf.conf` automatically if PF rejects the new config
-- providing `verify.sh` for both config checks and optional active checks
+- providing `verify.sh` for PF checks, optional resolver-override checks, and optional active checks
 
 ## Why This Repo Uses Standalone Mullvad Instead Of The Tailscale Mullvad Add-On
 
@@ -160,12 +190,19 @@ After installation:
 
 ```bash
 sudo bash verify.sh
-sudo bash verify.sh --tailnet-target <peer> --magicdns-name <peer>.ts.net
+sudo bash verify.sh --tailnet-target <peer> --magicdns-name <peer>.your-tailnet.ts.net
 sudo pfctl -a tailscale -sr
 sudo pfctl -sr | grep 'anchor "tailscale"'
-dig +short @100.100.100.100 <peer>.ts.net
-dscacheutil -q host -a name <peer>.ts.net
+dig +short @100.100.100.100 <peer>.your-tailnet.ts.net
+dscacheutil -q host -a name <peer>.your-tailnet.ts.net
 curl https://am.i.mullvad.net/connected
+```
+
+If you also installed the optional resolver override:
+
+```bash
+sudo bash verify.sh --tailnet-domain your-tailnet.ts.net --magicdns-name <peer>.your-tailnet.ts.net
+cat /etc/resolver/your-tailnet.ts.net
 ```
 
 After a major macOS upgrade:

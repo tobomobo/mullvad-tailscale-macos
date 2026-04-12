@@ -12,6 +12,7 @@ PGREP_BIN="${PGREP_BIN:-pgrep}"
 CURL_BIN="${CURL_BIN:-curl}"
 DIG_BIN="${DIG_BIN:-dig}"
 DSCACHEUTIL_BIN="${DSCACHEUTIL_BIN:-dscacheutil}"
+KILLALL_BIN="${KILLALL_BIN:-killall}"
 LAUNCHCTL_BIN="${LAUNCHCTL_BIN:-launchctl}"
 PLUTIL_BIN="${PLUTIL_BIN:-plutil}"
 CHOWN_BIN="${CHOWN_BIN:-chown}"
@@ -20,7 +21,9 @@ CP_BIN="${CP_BIN:-cp}"
 RM_BIN="${RM_BIN:-rm}"
 CMP_BIN="${CMP_BIN:-cmp}"
 DATE_BIN="${DATE_BIN:-date}"
+MKDIR_BIN="${MKDIR_BIN:-mkdir}"
 HOSTS_FILE="${HOSTS_FILE:-/etc/hosts}"
+RESOLVER_DIR="${RESOLVER_DIR:-/etc/resolver}"
 
 TAILSCALED_DAEMON_LABEL="${TAILSCALED_DAEMON_LABEL:-com.tailscale.tailscaled}"
 TAILSCALED_DAEMON_PLIST="${TAILSCALED_DAEMON_PLIST:-/Library/LaunchDaemons/com.tailscale.tailscaled.plist}"
@@ -29,6 +32,8 @@ TAILSCALED_STDERR_PATH="${TAILSCALED_STDERR_PATH:-/var/log/tailscaled.err}"
 
 TAILSCALE_IPV4_RANGE="100.64.0.0/10"
 TAILSCALE_IPV6_RANGE="fd7a:115c:a1e0::/48"
+TAILSCALE_MAGICDNS_SERVER="${TAILSCALE_MAGICDNS_SERVER:-100.100.100.100}"
+TAILNET_RESOLVER_COMMENT="# Managed by install-tailnet-resolver.sh"
 ANCHOR_COMMENT="# Tailscale anchor - allow tailnet traffic through Mullvad kill switch"
 ANCHOR_LINE="anchor \"$TAILSCALE_ANCHOR_NAME\""
 LOAD_LINE="load anchor \"$TAILSCALE_ANCHOR_NAME\" from \"$ANCHOR_FILE\""
@@ -54,6 +59,25 @@ timestamp() {
 
 make_temp_file() {
   mktemp "${TMPDIR:-/tmp}/$1.XXXXXX"
+}
+
+validate_tailnet_domain() {
+  local domain="$1"
+
+  [[ -n "$domain" ]] || return 1
+  [[ "$domain" != .* ]] || return 1
+  [[ "$domain" != *. ]] || return 1
+  [[ "$domain" != *..* ]] || return 1
+  [[ "$domain" == *.* ]] || return 1
+  [[ "$domain" =~ ^[A-Za-z0-9.-]+$ ]] || return 1
+  [[ "$domain" == *.ts.net ]]
+}
+
+validate_nameserver_ip() {
+  local nameserver="$1"
+
+  [[ -n "$nameserver" ]] || return 1
+  [[ "$nameserver" =~ ^[0-9A-Fa-f:.]+$ ]]
 }
 
 has_exact_line() {
@@ -103,7 +127,7 @@ list_has_common_line() {
 direct_magicdns_lookup() {
   local hostname="$1"
 
-  { "$DIG_BIN" +short @100.100.100.100 "$hostname" 2>/dev/null || true; } | extract_ip_lines
+  { "$DIG_BIN" +short @"$TAILSCALE_MAGICDNS_SERVER" "$hostname" 2>/dev/null || true; } | extract_ip_lines
 }
 
 system_resolver_lookup() {
@@ -232,10 +256,11 @@ backup_file() {
 install_root_owned_file() {
   local source_file="$1"
   local destination_file="$2"
+  local file_mode="${3:-644}"
 
   "$CP_BIN" "$source_file" "$destination_file"
   "$CHOWN_BIN" root:wheel "$destination_file"
-  "$CHMOD_BIN" 644 "$destination_file"
+  "$CHMOD_BIN" "$file_mode" "$destination_file"
 }
 
 validate_anchor_file() {
@@ -344,4 +369,43 @@ bootout_launchdaemon() {
 bootstrap_launchdaemon() {
   "$LAUNCHCTL_BIN" bootstrap system "$TAILSCALED_DAEMON_PLIST" >/dev/null 2>&1
   "$LAUNCHCTL_BIN" kickstart -k "$(launchdaemon_service_target)" >/dev/null 2>&1
+}
+
+resolver_file_for_domain() {
+  local domain="$1"
+
+  echo "${RESOLVER_DIR}/${domain}"
+}
+
+write_tailnet_resolver_file() {
+  local destination_file="$1"
+  local domain="$2"
+
+  cat > "$destination_file" <<EOF
+${TAILNET_RESOLVER_COMMENT}
+# Routes ${domain} lookups to Tailscale MagicDNS.
+nameserver ${TAILSCALE_MAGICDNS_SERVER}
+EOF
+}
+
+resolver_file_has_nameserver() {
+  local file="$1"
+  local nameserver="${2:-$TAILSCALE_MAGICDNS_SERVER}"
+
+  has_exact_line "$file" "nameserver $nameserver"
+}
+
+resolver_file_managed_by_repo() {
+  local file="$1"
+
+  has_exact_line "$file" "$TAILNET_RESOLVER_COMMENT"
+}
+
+flush_dns_caches() {
+  local rc=0
+
+  "$DSCACHEUTIL_BIN" -flushcache >/dev/null 2>&1 || rc=1
+  "$KILLALL_BIN" -HUP mDNSResponder >/dev/null 2>&1 || rc=1
+
+  return "$rc"
 }

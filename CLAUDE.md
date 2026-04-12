@@ -19,6 +19,7 @@ A good change in this repo usually does all of the following:
 - keeps Tailscale interface handling dynamic
 - keeps PF edits exact, validated, and rollback-safe
 - keeps LaunchDaemon management inside the provided scripts
+- keeps any optional MagicDNS fix domain-scoped in `/etc/resolver` for real `.ts.net` tailnet domains, not per-host in `/etc/hosts`
 - keeps verification realistic about what is checked vs. what is merely expected
 - keeps direct MagicDNS checks separate from macOS system-resolver checks
 - updates docs and tests when behavior changes
@@ -41,6 +42,8 @@ bash -n uninstall.sh
 bash -n verify.sh
 bash -n install-tailscaled-daemon.sh
 bash -n uninstall-tailscaled-daemon.sh
+bash -n install-tailnet-resolver.sh
+bash -n uninstall-tailnet-resolver.sh
 bash -n lib/common.sh
 ```
 
@@ -56,6 +59,7 @@ bash tests/run.sh
 - `pfctl -f` reload behavior
 - detection of the active Tailscale `utun` interface
 - LaunchDaemon install and unload flows
+- optional `/etc/resolver/<tailnet>.ts.net` management
 - any security or DNS leak wording in the docs
 - any MagicDNS validation that forgets about `/etc/hosts`, `dscacheutil`, or resolver precedence
 

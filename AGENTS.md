@@ -9,6 +9,7 @@ If you are an agent making changes here, optimize for safety first. This repo mo
 - Install a PF anchor that allows Tailscale's tailnet ranges through Mullvad's kill switch.
 - Detect the active Tailscale `utun` interface dynamically instead of assuming `utun0`.
 - Manage an optional `tailscaled` LaunchDaemon through code, not copy-pasted plist snippets.
+- Manage an optional tailnet-scoped `/etc/resolver/<tailnet>.ts.net` override through code when Mullvad breaks MagicDNS for normal macOS apps.
 - Verify both configuration state and optional live connectivity checks.
 
 ## Files That Matter
@@ -25,6 +26,10 @@ If you are an agent making changes here, optimize for safety first. This repo mo
   Installs the managed LaunchDaemon using `launchctl bootstrap`.
 - `uninstall-tailscaled-daemon.sh`
   Removes the managed LaunchDaemon.
+- `install-tailnet-resolver.sh`
+  Installs an optional domain-scoped MagicDNS resolver override for a tailnet.
+- `uninstall-tailnet-resolver.sh`
+  Removes the optional resolver override.
 - `etc/pf.anchors/tailscale`
   Template, not a fixed installed anchor.
 - `tests/run.sh`
@@ -42,6 +47,7 @@ If you are an agent making changes here, optimize for safety first. This repo mo
 - Restore the original `pf.conf` automatically if `pfctl -f` fails.
 - Treat active leak/connectivity checks as verification, not as proof of universal safety.
 - Keep direct MagicDNS checks separate from macOS system-resolver checks; `/etc/hosts`, `dscacheutil`, and resolver precedence can make them disagree.
+- If you manage resolver overrides, keep them domain-scoped in `/etc/resolver/<tailnet>.ts.net` for real tailnet domains ending in `.ts.net`; do not add per-host `/etc/hosts` hacks to the repo workflow.
 - Keep docs honest: say "should" or "expected to" unless the code actually proves it.
 - If you change install, uninstall, verify, or shared helper behavior, update `tests/run.sh`.
 
@@ -70,6 +76,8 @@ bash -n uninstall.sh
 bash -n verify.sh
 bash -n install-tailscaled-daemon.sh
 bash -n uninstall-tailscaled-daemon.sh
+bash -n install-tailnet-resolver.sh
+bash -n uninstall-tailnet-resolver.sh
 bash -n lib/common.sh
 bash tests/run.sh
 ```
@@ -81,6 +89,7 @@ If you changed only docs, note that the smoke tests were not rerun if you choose
 - Do not claim the repo has performed a live-system security audit unless one was actually done.
 - Do not introduce substring-based `grep tailscale` logic for managed `pf.conf` lines.
 - Do not add ad hoc plist instructions to the README if the repo can manage that flow in code.
+- Do not document per-host `/etc/hosts` entries as the preferred solution when a domain-scoped `/etc/resolver/<tailnet>.ts.net` override will do.
 - Do not remove rollback protection.
 - Do not silently broaden the PF exception beyond Tailscale's CGNAT and IPv6 ULA ranges.
 - Do not run destructive live PF or launchd changes on a user's machine without clear intent.

@@ -2,6 +2,8 @@
 
 Mullvad's PF-based kill switch can block Tailscale traffic on macOS. This repo fixes that by installing a persistent PF anchor that explicitly allows Tailscale's tailnet ranges on Tailscale's active `utun` interface before Mullvad's blocking rules evaluate the packet.
 
+On some Macs, Mullvad also leaves normal app-level DNS on the wrong path for MagicDNS names. For that case, this repo now includes an optional domain-scoped `/etc/resolver/<tailnet>.ts.net` helper too.
+
 This repo is for the "standalone Mullvad app + standalone Tailscale" setup. It is not a wrapper around Tailscale's Mullvad exit-node add-on.
 
 For the deeper security model, DNS/leak discussion, and product tradeoffs, see [SECURITY.md](SECURITY.md).
@@ -55,6 +57,14 @@ If Tailscale is not running yet and the script cannot auto-detect its active int
 sudo bash install.sh --interface utun3
 ```
 
+If tailnet hostnames still do not resolve reliably under Mullvad even though Tailscale itself is reachable, install the optional domain-scoped resolver override:
+
+```bash
+sudo bash install-tailnet-resolver.sh --tailnet-domain your-tailnet.ts.net
+```
+
+That writes `/etc/resolver/your-tailnet.ts.net` pointing at Tailscale MagicDNS. It is system-wide for all local users and is cleaner than adding per-host `/etc/hosts` entries.
+
 Verify:
 
 ```bash
@@ -64,7 +74,7 @@ sudo bash verify.sh
 For active end-to-end checks:
 
 ```bash
-sudo bash verify.sh --tailnet-target <peer> --magicdns-name <peer>.ts.net
+sudo bash verify.sh --tailnet-target <peer> --magicdns-name <peer>.your-tailnet.ts.net
 ```
 
 When `--tailnet-target` is provided, `verify.sh` now checks two different things:
@@ -84,8 +94,12 @@ So "peer reachable, but via DERP" is treated as a working tailnet connection wit
   Installs a system LaunchDaemon for `tailscaled` using `launchctl bootstrap`.
 - `uninstall-tailscaled-daemon.sh`
   Removes the repo-managed `tailscaled` LaunchDaemon.
+- `install-tailnet-resolver.sh`
+  Installs an optional domain-scoped `/etc/resolver/<tailnet>.ts.net` override that points macOS apps at Tailscale MagicDNS.
+- `uninstall-tailnet-resolver.sh`
+  Removes the optional resolver override.
 - `verify.sh`
-  Checks exact `pf.conf` lines, interface targeting, PF runtime state, daemon state, and optional active connectivity checks.
+  Checks exact `pf.conf` lines, interface targeting, PF runtime state, daemon state, optional resolver override state, and optional active connectivity checks.
 
 ## Why Not Just Use The Tailscale Mullvad Add-On?
 
@@ -120,17 +134,60 @@ sudo pfctl -a tailscale -sr
 sudo pfctl -sr | grep 'anchor "tailscale"'
 tailscale ping --tsmp <hostname>
 tailscale ping <hostname>
-dig +short @100.100.100.100 <hostname>.ts.net
-dscacheutil -q host -a name <hostname>.ts.net
+dig +short @100.100.100.100 <hostname>.your-tailnet.ts.net
+dscacheutil -q host -a name <hostname>.your-tailnet.ts.net
+sudo cat /etc/resolver/your-tailnet.ts.net
 curl https://am.i.mullvad.net/connected
 ```
 
 When checking hostname resolution on macOS, treat those commands differently:
 
-- `dig +short @100.100.100.100 <hostname>.ts.net` tests direct MagicDNS reachability
-- `dscacheutil -q host -a name <hostname>.ts.net` tests the macOS system resolver path that apps such as `curl` normally use
+- `dig +short @100.100.100.100 <hostname>.your-tailnet.ts.net` tests direct MagicDNS reachability
+- `dscacheutil -q host -a name <hostname>.your-tailnet.ts.net` tests the macOS system resolver path that apps such as `curl` normally use
 
 If those disagree, fix the resolver path before assuming the PF workaround is broken.
+
+## Optional Tailnet Resolver Override
+
+For many macOS setups, the PF anchor is enough by itself. Some Mullvad setups still leave macOS apps on the wrong DNS path for tailnet names, even though:
+
+- `tailscale ping --tsmp <peer>` works
+- `dig +short @100.100.100.100 <peer>.your-tailnet.ts.net` returns the correct Tailscale IP
+- app-level hostname access still fails under Mullvad
+
+That is the case this optional script is for:
+
+```bash
+sudo bash install-tailnet-resolver.sh --tailnet-domain your-tailnet.ts.net
+```
+
+It installs a single file:
+
+```text
+/etc/resolver/your-tailnet.ts.net
+```
+
+with:
+
+```text
+nameserver 100.100.100.100
+```
+
+That is domain-scoped, not per-host hardcoding. It keeps IP assignment dynamic and usually works better than adding static `/etc/hosts` entries.
+
+The helper installs it as a root-owned but readable file, so non-admin users can inspect it even though an admin is still required to create or change it.
+
+To remove it later:
+
+```bash
+sudo bash uninstall-tailnet-resolver.sh --tailnet-domain your-tailnet.ts.net
+```
+
+To verify that optional resolver override after installation:
+
+```bash
+sudo bash verify.sh --tailnet-domain your-tailnet.ts.net --magicdns-name <peer>.your-tailnet.ts.net
+```
 
 ## Same Wi-Fi, MagicDNS, and Direct Connections
 
@@ -154,12 +211,12 @@ That conclusion only holds when the macOS system resolver also returns the expec
 
 ## Hostname Resolution Troubleshooting
 
-If `tailscale ping --tsmp <peer>` works but app access to `https://<peer>.ts.net` does not, compare the direct MagicDNS answer with the macOS system resolver:
+If `tailscale ping --tsmp <peer>` works but app access to `https://<peer>.your-tailnet.ts.net` does not, compare the direct MagicDNS answer with the macOS system resolver:
 
 ```bash
-dig +short @100.100.100.100 <peer>.ts.net
-dscacheutil -q host -a name <peer>.ts.net
-grep -nF '<peer>.ts.net' /etc/hosts
+dig +short @100.100.100.100 <peer>.your-tailnet.ts.net
+dscacheutil -q host -a name <peer>.your-tailnet.ts.net
+grep -nF '<peer>.your-tailnet.ts.net' /etc/hosts
 scutil --dns
 ```
 
@@ -171,6 +228,8 @@ Interpret the results like this:
   a local override or a different resolver path is winning
 - `/etc/hosts` contains the hostname:
   app-level access may work because of a static override, even if MagicDNS is broken or bypassed
+- direct MagicDNS is correct, but macOS apps still fail:
+  install the optional resolver override for `your-tailnet.ts.net` instead of adding more `/etc/hosts` entries
 
 Before editing local resolver files, back them up:
 
@@ -187,7 +246,7 @@ sudo dscacheutil -flushcache
 sudo killall -HUP mDNSResponder
 ```
 
-One practical note from real-world testing on macOS: a plain `dig <peer>.ts.net` can disagree with the system resolver path that `curl` uses. If `curl https://<peer>.ts.net` works but plain `dig` does not, prefer the `dscacheutil` and app-level result when diagnosing split DNS.
+One practical note from real-world testing on macOS: a plain `dig <peer>.your-tailnet.ts.net` can disagree with the system resolver path that `curl` uses. If `curl https://<peer>.your-tailnet.ts.net` works but plain `dig` does not, prefer the `dscacheutil` and app-level result when diagnosing split DNS.
 
 ## Maintenance
 
@@ -214,6 +273,8 @@ If you want the full rationale for why this approach should be safe, where it ca
 | `uninstall.sh` | Removes the managed PF anchor block and installed anchor file |
 | `install-tailscaled-daemon.sh` | Installs a system LaunchDaemon for `tailscaled` |
 | `uninstall-tailscaled-daemon.sh` | Removes the repo-managed `tailscaled` LaunchDaemon |
+| `install-tailnet-resolver.sh` | Installs an optional domain-scoped MagicDNS resolver override |
+| `uninstall-tailnet-resolver.sh` | Removes the optional resolver override |
 | `etc/pf.anchors/tailscale` | Template used to render interface-specific PF anchor rules |
 | `lib/common.sh` | Shared helpers for PF and LaunchDaemon management |
 | `verify.sh` | Verifies configuration and optional active checks |

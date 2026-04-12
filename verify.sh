@@ -13,15 +13,17 @@ PASS=0
 FAIL=0
 WARN=0
 TAILNET_TARGET=""
+TAILNET_DOMAIN=""
 MAGICDNS_NAME=""
 CHECK_MULLVAD=1
 
 usage() {
   cat <<EOF
-Usage: bash verify.sh [--interface utunX] [--tailnet-target host] [--magicdns-name name.ts.net] [--no-mullvad-check]
+Usage: bash verify.sh [--interface utunX] [--tailnet-target host] [--tailnet-domain domain.ts.net] [--magicdns-name name.ts.net] [--no-mullvad-check]
 
 Performs configuration checks plus optional active validation:
   --tailnet-target  Run a TSMP reachability check plus a DISCO direct-path probe against a tailnet peer.
+  --tailnet-domain Validate an optional /etc/resolver override for a tailnet domain.
   --magicdns-name   Validate direct MagicDNS plus macOS hostname resolution for a MagicDNS name.
   --no-mullvad-check Skip the curl check against https://am.i.mullvad.net/connected.
 EOF
@@ -33,11 +35,19 @@ warn() { echo -e "  ${YELLOW}[WARN]${NC} $1"; WARN=$((WARN + 1)); }
 
 print_magicdns_followups() {
   local hostname="$1"
+  local suggested_tailnet_domain=""
+
+  if [[ "$hostname" == *.* ]]; then
+    suggested_tailnet_domain="${hostname#*.}"
+  fi
 
   echo "      Follow up: grep -nF '$hostname' $HOSTS_FILE"
   echo "      Follow up: dscacheutil -q host -a name $hostname"
-  echo "      Follow up: dig +short @100.100.100.100 $hostname"
+  echo "      Follow up: dig +short @$TAILSCALE_MAGICDNS_SERVER $hostname"
   echo "      Follow up: scutil --dns"
+  if [[ -n "$suggested_tailnet_domain" && "$suggested_tailnet_domain" != "$hostname" ]]; then
+    echo "      Optional: sudo bash install-tailnet-resolver.sh --tailnet-domain $suggested_tailnet_domain"
+  fi
 }
 
 while [[ $# -gt 0 ]]; do
@@ -50,6 +60,11 @@ while [[ $# -gt 0 ]]; do
     --tailnet-target)
       [[ $# -ge 2 ]] || die "--tailnet-target requires a value."
       TAILNET_TARGET="$2"
+      shift 2
+      ;;
+    --tailnet-domain)
+      [[ $# -ge 2 ]] || die "--tailnet-domain requires a value."
+      TAILNET_DOMAIN="$2"
       shift 2
       ;;
     --magicdns-name)
@@ -162,6 +177,28 @@ else
 fi
 
 echo "6. Active checks"
+if [[ -n "$TAILNET_DOMAIN" ]]; then
+  if validate_tailnet_domain "$TAILNET_DOMAIN"; then
+    resolver_file="$(resolver_file_for_domain "$TAILNET_DOMAIN")"
+    if [[ -f "$resolver_file" ]]; then
+      if resolver_file_managed_by_repo "$resolver_file"; then
+        pass "Repo-managed resolver override file exists for $TAILNET_DOMAIN at $resolver_file"
+        if resolver_file_has_nameserver "$resolver_file" "$TAILSCALE_MAGICDNS_SERVER"; then
+          pass "Resolver override points $TAILNET_DOMAIN at $TAILSCALE_MAGICDNS_SERVER"
+        else
+          fail "Resolver override for $TAILNET_DOMAIN does not point at $TAILSCALE_MAGICDNS_SERVER"
+        fi
+      else
+        warn "Resolver file exists for $TAILNET_DOMAIN at $resolver_file, but it is not managed by this repo"
+      fi
+    else
+      warn "No repo-managed resolver override file found for $TAILNET_DOMAIN at $resolver_file"
+    fi
+  else
+    fail "Invalid --tailnet-domain value: $TAILNET_DOMAIN"
+  fi
+fi
+
 if [[ -n "$TAILNET_TARGET" ]]; then
   if tsmp_output="$("$TAILSCALE_BIN" ping --tsmp --c 1 --timeout 5s "$TAILNET_TARGET" 2>&1)"; then
     pass "TSMP ping succeeded for $TAILNET_TARGET"
@@ -181,10 +218,14 @@ else
 fi
 
 if [[ -n "$MAGICDNS_NAME" ]]; then
+  if [[ -n "$TAILNET_DOMAIN" && "$MAGICDNS_NAME" != *."$TAILNET_DOMAIN" && "$MAGICDNS_NAME" != "$TAILNET_DOMAIN" ]]; then
+    warn "$MAGICDNS_NAME does not end with the requested tailnet domain $TAILNET_DOMAIN"
+  fi
+
   direct_magicdns_ips="$(direct_magicdns_lookup "$MAGICDNS_NAME")"
 
   if [[ -n "$direct_magicdns_ips" ]]; then
-    pass "Direct MagicDNS lookup resolved $MAGICDNS_NAME via 100.100.100.100 ($(join_lines "$direct_magicdns_ips"))"
+    pass "Direct MagicDNS lookup resolved $MAGICDNS_NAME via $TAILSCALE_MAGICDNS_SERVER ($(join_lines "$direct_magicdns_ips"))"
   else
     fail "Direct MagicDNS lookup failed for $MAGICDNS_NAME"
     print_magicdns_followups "$MAGICDNS_NAME"
