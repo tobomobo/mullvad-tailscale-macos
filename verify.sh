@@ -22,7 +22,7 @@ Usage: bash verify.sh [--interface utunX] [--tailnet-target host] [--magicdns-na
 
 Performs configuration checks plus optional active validation:
   --tailnet-target  Run a TSMP reachability check plus a DISCO direct-path probe against a tailnet peer.
-  --magicdns-name   Resolve a MagicDNS name directly via 100.100.100.100.
+  --magicdns-name   Validate direct MagicDNS plus macOS hostname resolution for a MagicDNS name.
   --no-mullvad-check Skip the curl check against https://am.i.mullvad.net/connected.
 EOF
 }
@@ -30,6 +30,15 @@ EOF
 pass() { echo -e "  ${GREEN}[PASS]${NC} $1"; PASS=$((PASS + 1)); }
 fail() { echo -e "  ${RED}[FAIL]${NC} $1"; FAIL=$((FAIL + 1)); }
 warn() { echo -e "  ${YELLOW}[WARN]${NC} $1"; WARN=$((WARN + 1)); }
+
+print_magicdns_followups() {
+  local hostname="$1"
+
+  echo "      Follow up: grep -nF '$hostname' $HOSTS_FILE"
+  echo "      Follow up: dscacheutil -q host -a name $hostname"
+  echo "      Follow up: dig +short @100.100.100.100 $hostname"
+  echo "      Follow up: scutil --dns"
+}
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -172,10 +181,39 @@ else
 fi
 
 if [[ -n "$MAGICDNS_NAME" ]]; then
-  if [[ -n "$("$DIG_BIN" +short @100.100.100.100 "$MAGICDNS_NAME" 2>/dev/null)" ]]; then
-    pass "MagicDNS resolved $MAGICDNS_NAME via 100.100.100.100"
+  direct_magicdns_ips="$(direct_magicdns_lookup "$MAGICDNS_NAME")"
+
+  if [[ -n "$direct_magicdns_ips" ]]; then
+    pass "Direct MagicDNS lookup resolved $MAGICDNS_NAME via 100.100.100.100 ($(join_lines "$direct_magicdns_ips"))"
   else
-    fail "MagicDNS lookup failed for $MAGICDNS_NAME"
+    fail "Direct MagicDNS lookup failed for $MAGICDNS_NAME"
+    print_magicdns_followups "$MAGICDNS_NAME"
+  fi
+
+  hosts_override_ips="$(hosts_file_lookup "$MAGICDNS_NAME")"
+  if [[ -n "$hosts_override_ips" ]]; then
+    warn "$HOSTS_FILE contains a static override for $MAGICDNS_NAME ($(join_lines "$hosts_override_ips")); app-level access may work even if MagicDNS is misconfigured"
+  fi
+
+  if command -v "$DSCACHEUTIL_BIN" >/dev/null 2>&1; then
+    system_resolver_ips="$(system_resolver_lookup "$MAGICDNS_NAME")"
+    if [[ -n "$system_resolver_ips" ]]; then
+      if [[ -n "$direct_magicdns_ips" ]] && list_has_common_line "$direct_magicdns_ips" "$system_resolver_ips"; then
+        pass "macOS system resolver returned an expected Tailscale address for $MAGICDNS_NAME ($(join_lines "$system_resolver_ips"))"
+      elif [[ -n "$direct_magicdns_ips" ]]; then
+        fail "macOS system resolver returned $(join_lines "$system_resolver_ips") for $MAGICDNS_NAME, which does not match direct MagicDNS ($(join_lines "$direct_magicdns_ips"))"
+        print_magicdns_followups "$MAGICDNS_NAME"
+      else
+        warn "macOS system resolver returned $(join_lines "$system_resolver_ips") for $MAGICDNS_NAME"
+      fi
+    elif [[ -n "$direct_magicdns_ips" ]]; then
+      fail "macOS system resolver did not return an address for $MAGICDNS_NAME, even though direct MagicDNS resolved it"
+      print_magicdns_followups "$MAGICDNS_NAME"
+    else
+      warn "macOS system resolver did not return an address for $MAGICDNS_NAME"
+    fi
+  else
+    warn "dscacheutil not found; skipping macOS system resolver validation for $MAGICDNS_NAME"
   fi
 else
   warn "No --magicdns-name provided; skipping MagicDNS resolution check"

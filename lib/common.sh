@@ -11,6 +11,7 @@ TAILSCALE_BIN="${TAILSCALE_BIN:-tailscale}"
 PGREP_BIN="${PGREP_BIN:-pgrep}"
 CURL_BIN="${CURL_BIN:-curl}"
 DIG_BIN="${DIG_BIN:-dig}"
+DSCACHEUTIL_BIN="${DSCACHEUTIL_BIN:-dscacheutil}"
 LAUNCHCTL_BIN="${LAUNCHCTL_BIN:-launchctl}"
 PLUTIL_BIN="${PLUTIL_BIN:-plutil}"
 CHOWN_BIN="${CHOWN_BIN:-chown}"
@@ -19,6 +20,7 @@ CP_BIN="${CP_BIN:-cp}"
 RM_BIN="${RM_BIN:-rm}"
 CMP_BIN="${CMP_BIN:-cmp}"
 DATE_BIN="${DATE_BIN:-date}"
+HOSTS_FILE="${HOSTS_FILE:-/etc/hosts}"
 
 TAILSCALED_DAEMON_LABEL="${TAILSCALED_DAEMON_LABEL:-com.tailscale.tailscaled}"
 TAILSCALED_DAEMON_PLIST="${TAILSCALED_DAEMON_PLIST:-/Library/LaunchDaemons/com.tailscale.tailscaled.plist}"
@@ -59,6 +61,84 @@ has_exact_line() {
   local line="$2"
 
   [[ -f "$file" ]] && grep -Fqx -- "$line" "$file"
+}
+
+extract_ip_lines() {
+  awk '
+    /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/ || /^[0-9A-Fa-f:]+$/ {
+      if (!seen[$0]++) {
+        print $0
+      }
+    }
+  '
+}
+
+join_lines() {
+  local data="$1"
+  local separator="${2:-, }"
+
+  awk -v separator="$separator" '
+    NF {
+      output = output ? output separator $0 : $0
+    }
+    END {
+      print output
+    }
+  ' <<<"$data"
+}
+
+list_has_common_line() {
+  local first="$1"
+  local second="$2"
+  local line
+
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    grep -Fqx -- "$line" <<<"$second" && return 0
+  done <<<"$first"
+
+  return 1
+}
+
+direct_magicdns_lookup() {
+  local hostname="$1"
+
+  { "$DIG_BIN" +short @100.100.100.100 "$hostname" 2>/dev/null || true; } | extract_ip_lines
+}
+
+system_resolver_lookup() {
+  local hostname="$1"
+
+  { "$DSCACHEUTIL_BIN" -q host -a name "$hostname" 2>/dev/null || true; } | awk '
+    /^ip_address: / {
+      if (!seen[$2]++) {
+        print $2
+      }
+    }
+  '
+}
+
+hosts_file_lookup() {
+  local hostname="$1"
+  local file="${2:-$HOSTS_FILE}"
+
+  [[ -f "$file" ]] || return 0
+
+  awk -v hostname="$hostname" '
+    /^[[:space:]]*#/ || NF < 2 { next }
+    {
+      ip = $1
+      if (ip !~ /^[0-9A-Fa-f:.]+$/) {
+        next
+      }
+
+      for (i = 2; i <= NF; i++) {
+        if ($i == hostname && !seen[ip]++) {
+          print ip
+        }
+      }
+    }
+  ' "$file" 2>/dev/null || true
 }
 
 detect_tailscale_interface() {

@@ -41,6 +41,7 @@ If you are an agent making changes here, optimize for safety first. This repo mo
 - Validate staged `pf.conf` content before reloading PF.
 - Restore the original `pf.conf` automatically if `pfctl -f` fails.
 - Treat active leak/connectivity checks as verification, not as proof of universal safety.
+- Keep direct MagicDNS checks separate from macOS system-resolver checks; `/etc/hosts`, `dscacheutil`, and resolver precedence can make them disagree.
 - Keep docs honest: say "should" or "expected to" unless the code actually proves it.
 - If you change install, uninstall, verify, or shared helper behavior, update `tests/run.sh`.
 
@@ -90,6 +91,7 @@ If you changed only docs, note that the smoke tests were not rerun if you choose
 - Does it keep `pf.conf` edits exact and reversible?
 - Does it preserve or improve test coverage?
 - Does the README still match the actual scripts?
+- Does any DNS or MagicDNS check account for `/etc/hosts`, `dscacheutil`, and resolver precedence under Mullvad?
 - Are security statements precise and evidence-based?
 
 ## Reality Check

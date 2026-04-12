@@ -46,6 +46,47 @@ sudo bash verify.sh --tailnet-target <peer> --magicdns-name <peer>.ts.net
 curl https://am.i.mullvad.net/connected
 ```
 
+## Direct MagicDNS Is Not The Same As macOS Hostname Resolution
+
+A direct query to `100.100.100.100` proves that MagicDNS is reachable on the tailnet path. It does not prove that macOS apps are using that same resolver path.
+
+In practice, app-level hostname resolution can still be changed by:
+
+- `/etc/hosts`
+- `/etc/resolver/*`
+- the active resolver order shown by `scutil --dns`
+- a local DNS proxy or VPN-managed resolver path
+
+That means a result like this is possible:
+
+- `dig +short @100.100.100.100 host.ts.net` returns the correct Tailscale IP
+- but `dscacheutil -q host -a name host.ts.net` returns nothing or a different IP
+- or an app works only because `/etc/hosts` contains a static override
+
+When you are validating hostname access on macOS, check both layers:
+
+```bash
+dig +short @100.100.100.100 <peer>.ts.net
+dscacheutil -q host -a name <peer>.ts.net
+grep -nF '<peer>.ts.net' /etc/hosts
+scutil --dns
+```
+
+Before editing resolver files, back them up:
+
+```bash
+sudo cp /etc/hosts /etc/hosts.bak.$(date +%Y%m%d%H%M%S)
+sudo mkdir -p /etc/resolver
+sudo cp -R /etc/resolver /etc/resolver.bak.$(date +%Y%m%d%H%M%S) 2>/dev/null || true
+```
+
+After changing `/etc/hosts` or `/etc/resolver/*`, flush caches:
+
+```bash
+sudo dscacheutil -flushcache
+sudo killall -HUP mDNSResponder
+```
+
 ## MagicDNS, Same-LAN Peers, And DERP
 
 MagicDNS resolves peer names to Tailscale addresses, not LAN addresses. That means a same-Wi-Fi connection to `host.ts.net` still depends on Tailscale traffic being allowed by PF.
@@ -57,16 +98,18 @@ This repo fixes that PF-layer problem, but it does not force Tailscale to use a 
 
 So a result like this:
 
-- MagicDNS resolves correctly
+- direct MagicDNS resolves correctly
 - `tailscale ping` succeeds
 - Mullvad remains connected
 - but the ping goes `via DERP`
 
 means the workaround is functioning, but direct peer discovery or UDP reachability is still failing for some other reason. In other words:
 
-- DNS resolution worked
+- direct MagicDNS worked
 - the PF exception worked
 - the remaining problem is direct Tailscale path establishment
+
+If app-level hostname access is still failing in that scenario, inspect macOS resolver precedence before concluding that "DNS worked."
 
 This is also why the repo's active verifier should treat "TSMP reachability works, but DISCO direct path failed" as a warning rather than a hard failure. A DERP fallback means tailnet connectivity still works; it does not mean the PF fix failed.
 
@@ -120,6 +163,8 @@ sudo bash verify.sh
 sudo bash verify.sh --tailnet-target <peer> --magicdns-name <peer>.ts.net
 sudo pfctl -a tailscale -sr
 sudo pfctl -sr | grep 'anchor "tailscale"'
+dig +short @100.100.100.100 <peer>.ts.net
+dscacheutil -q host -a name <peer>.ts.net
 curl https://am.i.mullvad.net/connected
 ```
 

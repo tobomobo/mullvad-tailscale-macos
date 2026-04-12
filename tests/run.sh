@@ -139,6 +139,12 @@ printf '%s\n' "${DIG_OUTPUT:-}"
 exit 0
 EOF
 
+  cat > "$bin_dir/dscacheutil" <<'EOF'
+#!/bin/bash
+printf '%s\n' "${DSCACHEUTIL_OUTPUT:-}"
+exit 0
+EOF
+
   cat > "$bin_dir/tailscale" <<'EOF'
 #!/bin/bash
 if [[ "${1:-}" == "ping" ]]; then
@@ -202,6 +208,8 @@ run_verify_env() {
   PGREP_BIN="$bin_dir/pgrep" \
   CURL_BIN="$bin_dir/curl" \
   DIG_BIN="$bin_dir/dig" \
+  DSCACHEUTIL_BIN="$bin_dir/dscacheutil" \
+  HOSTS_FILE="$workspace/hosts" \
   TAILSCALE_BIN="$bin_dir/tailscale" \
   TAILSCALED_DAEMON_PLIST="$workspace/com.tailscale.tailscaled.plist" \
   bash "$ROOT_DIR/verify.sh" "$@"
@@ -242,6 +250,7 @@ new_workspace() {
   mkdir -p "$workspace/bin" "$workspace/ifconfig" "$workspace/logs" "$workspace/pf.anchors"
   : > "$workspace/logs/pfctl.calls"
   : > "$workspace/logs/launchctl.calls"
+  : > "$workspace/hosts"
   setup_fake_commands "$workspace/bin"
   echo "$workspace"
 }
@@ -374,6 +383,8 @@ EOF
   PGREP_MULLVAD_EXIT=0 \
   CURL_OUTPUT="You are connected to Mullvad" \
   DIG_OUTPUT="100.110.111.112" \
+  DSCACHEUTIL_OUTPUT="name: peer.ts.net
+ip_address: 100.110.111.112" \
   TAILSCALE_TSMP_EXIT=0 \
   TAILSCALE_DISCO_EXIT=0 \
   run_verify_env "$workspace" --tailnet-target peer --magicdns-name peer.ts.net
@@ -410,6 +421,8 @@ EOF
   PGREP_MULLVAD_EXIT=0 \
   CURL_OUTPUT="You are connected to Mullvad" \
   DIG_OUTPUT="100.110.111.112" \
+  DSCACHEUTIL_OUTPUT="name: peer.ts.net
+ip_address: 100.110.111.112" \
   TAILSCALE_TSMP_EXIT=0 \
   TAILSCALE_DISCO_EXIT=1 \
   TAILSCALE_DISCO_OUTPUT="pong from peer (100.110.111.112) via DERP(fra) in 40ms
@@ -417,6 +430,127 @@ direct connection not established" \
   run_verify_env "$workspace" --tailnet-target peer --magicdns-name peer.ts.net
 
   pass "verify treats DERP fallback as reachable and reports direct-path failure as a warning"
+}
+
+test_verify_rejects_system_resolver_mismatch() {
+  local workspace
+  workspace="$(new_workspace verify-dns-mismatch)"
+
+  cat > "$workspace/pf.conf" <<EOF
+set skip on lo0
+anchor "tailscale"
+load anchor "tailscale" from "$workspace/pf.anchors/tailscale"
+EOF
+
+  cat > "$workspace/pf.anchors/tailscale" <<'EOF'
+pass out quick on utun7 inet from any to 100.64.0.0/10 no state
+pass in quick on utun7 inet from 100.64.0.0/10 to any no state
+pass out quick on utun7 inet6 from any to fd7a:115c:a1e0::/48 no state
+pass in quick on utun7 inet6 from fd7a:115c:a1e0::/48 to any no state
+EOF
+
+  cat > "$workspace/ifconfig/utun7" <<'EOF'
+utun7: flags=8051<UP,POINTOPOINT,RUNNING,MULTICAST> mtu 1280
+	inet 100.82.1.2 --> 100.82.1.2 netmask 0xffffffff
+EOF
+
+  touch "$workspace/com.tailscale.tailscaled.plist"
+
+  IFCONFIG_LIST="lo0 utun7" \
+  PGREP_TAILSCALED_EXIT=0 \
+  PGREP_MULLVAD_EXIT=0 \
+  CURL_OUTPUT="You are connected to Mullvad" \
+  DIG_OUTPUT="100.110.111.112" \
+  DSCACHEUTIL_OUTPUT="name: peer.ts.net
+ip_address: 100.120.121.122" \
+  TAILSCALE_TSMP_EXIT=0 \
+  TAILSCALE_DISCO_EXIT=0 \
+  run_verify_env "$workspace" --tailnet-target peer --magicdns-name peer.ts.net >/dev/null 2>&1 && fail "verify should fail when the macOS resolver disagrees with direct MagicDNS"
+
+  pass "verify rejects mismatched macOS hostname resolution"
+}
+
+test_verify_rejects_missing_system_resolution() {
+  local workspace
+  workspace="$(new_workspace verify-dns-missing)"
+
+  cat > "$workspace/pf.conf" <<EOF
+set skip on lo0
+anchor "tailscale"
+load anchor "tailscale" from "$workspace/pf.anchors/tailscale"
+EOF
+
+  cat > "$workspace/pf.anchors/tailscale" <<'EOF'
+pass out quick on utun7 inet from any to 100.64.0.0/10 no state
+pass in quick on utun7 inet from 100.64.0.0/10 to any no state
+pass out quick on utun7 inet6 from any to fd7a:115c:a1e0::/48 no state
+pass in quick on utun7 inet6 from fd7a:115c:a1e0::/48 to any no state
+EOF
+
+  cat > "$workspace/ifconfig/utun7" <<'EOF'
+utun7: flags=8051<UP,POINTOPOINT,RUNNING,MULTICAST> mtu 1280
+	inet 100.82.1.2 --> 100.82.1.2 netmask 0xffffffff
+EOF
+
+  touch "$workspace/com.tailscale.tailscaled.plist"
+
+  IFCONFIG_LIST="lo0 utun7" \
+  PGREP_TAILSCALED_EXIT=0 \
+  PGREP_MULLVAD_EXIT=0 \
+  CURL_OUTPUT="You are connected to Mullvad" \
+  DIG_OUTPUT="100.110.111.112" \
+  DSCACHEUTIL_OUTPUT="" \
+  TAILSCALE_TSMP_EXIT=0 \
+  TAILSCALE_DISCO_EXIT=0 \
+  run_verify_env "$workspace" --tailnet-target peer --magicdns-name peer.ts.net >/dev/null 2>&1 && fail "verify should fail when direct MagicDNS works but the macOS resolver returns nothing"
+
+  pass "verify rejects missing macOS hostname resolution when MagicDNS resolves directly"
+}
+
+test_verify_warns_on_hosts_override() {
+  local workspace
+  workspace="$(new_workspace verify-hosts-override)"
+
+  cat > "$workspace/pf.conf" <<EOF
+set skip on lo0
+anchor "tailscale"
+load anchor "tailscale" from "$workspace/pf.anchors/tailscale"
+EOF
+
+  cat > "$workspace/pf.anchors/tailscale" <<'EOF'
+pass out quick on utun7 inet from any to 100.64.0.0/10 no state
+pass in quick on utun7 inet from 100.64.0.0/10 to any no state
+pass out quick on utun7 inet6 from any to fd7a:115c:a1e0::/48 no state
+pass in quick on utun7 inet6 from fd7a:115c:a1e0::/48 to any no state
+EOF
+
+  cat > "$workspace/ifconfig/utun7" <<'EOF'
+utun7: flags=8051<UP,POINTOPOINT,RUNNING,MULTICAST> mtu 1280
+	inet 100.82.1.2 --> 100.82.1.2 netmask 0xffffffff
+EOF
+
+  cat > "$workspace/hosts" <<'EOF'
+100.110.111.112 peer.ts.net
+EOF
+
+  touch "$workspace/com.tailscale.tailscaled.plist"
+
+  output="$(
+    IFCONFIG_LIST="lo0 utun7" \
+    PGREP_TAILSCALED_EXIT=0 \
+    PGREP_MULLVAD_EXIT=0 \
+    CURL_OUTPUT="You are connected to Mullvad" \
+    DIG_OUTPUT="100.110.111.112" \
+    DSCACHEUTIL_OUTPUT="name: peer.ts.net
+ip_address: 100.110.111.112" \
+    TAILSCALE_TSMP_EXIT=0 \
+    TAILSCALE_DISCO_EXIT=0 \
+    run_verify_env "$workspace" --tailnet-target peer --magicdns-name peer.ts.net
+  )"
+
+  grep -Fq "[WARN]" <<<"$output" || fail "Expected a warning when the hostname is statically overridden in hosts"
+  grep -Fq "static override for peer.ts.net" <<<"$output" || fail "Expected hosts override warning output"
+  pass "verify warns when /etc/hosts masks MagicDNS"
 }
 
 test_daemon_installer_bootstraps_launchdaemon() {
@@ -451,6 +585,9 @@ test_uninstall_removes_anchor_block_and_file
 test_verify_rejects_partial_pf_conf
 test_verify_supports_active_checks
 test_verify_accepts_derp_fallback_as_reachable
+test_verify_rejects_system_resolver_mismatch
+test_verify_rejects_missing_system_resolution
+test_verify_warns_on_hosts_override
 test_daemon_installer_bootstraps_launchdaemon
 test_daemon_uninstaller_boots_out_and_removes_plist
 

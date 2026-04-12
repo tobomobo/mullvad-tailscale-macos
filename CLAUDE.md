@@ -20,6 +20,7 @@ A good change in this repo usually does all of the following:
 - keeps PF edits exact, validated, and rollback-safe
 - keeps LaunchDaemon management inside the provided scripts
 - keeps verification realistic about what is checked vs. what is merely expected
+- keeps direct MagicDNS checks separate from macOS system-resolver checks
 - updates docs and tests when behavior changes
 
 ## Claude-Specific Guidance
@@ -56,6 +57,7 @@ bash tests/run.sh
 - detection of the active Tailscale `utun` interface
 - LaunchDaemon install and unload flows
 - any security or DNS leak wording in the docs
+- any MagicDNS validation that forgets about `/etc/hosts`, `dscacheutil`, or resolver precedence
 
 ## Keep The Docs Honest
 

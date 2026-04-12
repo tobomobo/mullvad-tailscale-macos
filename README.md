@@ -121,8 +121,16 @@ sudo pfctl -sr | grep 'anchor "tailscale"'
 tailscale ping --tsmp <hostname>
 tailscale ping <hostname>
 dig +short @100.100.100.100 <hostname>.ts.net
+dscacheutil -q host -a name <hostname>.ts.net
 curl https://am.i.mullvad.net/connected
 ```
+
+When checking hostname resolution on macOS, treat those commands differently:
+
+- `dig +short @100.100.100.100 <hostname>.ts.net` tests direct MagicDNS reachability
+- `dscacheutil -q host -a name <hostname>.ts.net` tests the macOS system resolver path that apps such as `curl` normally use
+
+If those disagree, fix the resolver path before assuming the PF workaround is broken.
 
 ## Same Wi-Fi, MagicDNS, and Direct Connections
 
@@ -140,7 +148,46 @@ So a result like this:
 - Mullvad still reports connected
 - but `tailscale ping` says `via DERP`
 
-means the PF fix is working and MagicDNS is working. The remaining issue is direct-path establishment between the two Tailscale peers, not the firewall exception or DNS resolution.
+means the PF fix is working and direct MagicDNS is working. The remaining issue is likely direct-path establishment between the two Tailscale peers, not the PF exception itself.
+
+That conclusion only holds when the macOS system resolver also returns the expected Tailscale address. Direct `dig @100.100.100.100` alone does not prove that apps are using the same resolver path.
+
+## Hostname Resolution Troubleshooting
+
+If `tailscale ping --tsmp <peer>` works but app access to `https://<peer>.ts.net` does not, compare the direct MagicDNS answer with the macOS system resolver:
+
+```bash
+dig +short @100.100.100.100 <peer>.ts.net
+dscacheutil -q host -a name <peer>.ts.net
+grep -nF '<peer>.ts.net' /etc/hosts
+scutil --dns
+```
+
+Interpret the results like this:
+
+- direct MagicDNS resolves, but `dscacheutil` is empty:
+  macOS is not using the expected resolver path for that hostname
+- direct MagicDNS resolves, but `dscacheutil` returns a different IP:
+  a local override or a different resolver path is winning
+- `/etc/hosts` contains the hostname:
+  app-level access may work because of a static override, even if MagicDNS is broken or bypassed
+
+Before editing local resolver files, back them up:
+
+```bash
+sudo cp /etc/hosts /etc/hosts.bak.$(date +%Y%m%d%H%M%S)
+sudo mkdir -p /etc/resolver
+sudo cp -R /etc/resolver /etc/resolver.bak.$(date +%Y%m%d%H%M%S) 2>/dev/null || true
+```
+
+After changing `/etc/hosts` or `/etc/resolver/*`, flush caches:
+
+```bash
+sudo dscacheutil -flushcache
+sudo killall -HUP mDNSResponder
+```
+
+One practical note from real-world testing on macOS: a plain `dig <peer>.ts.net` can disagree with the system resolver path that `curl` uses. If `curl https://<peer>.ts.net` works but plain `dig` does not, prefer the `dscacheutil` and app-level result when diagnosing split DNS.
 
 ## Maintenance
 
