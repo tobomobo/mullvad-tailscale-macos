@@ -249,7 +249,14 @@ One practical note from real-world testing on macOS: a plain `dig <peer>.your-ta
 
 ## Maintenance
 
-After major macOS updates, confirm that both managed lines still exist in `/etc/pf.conf`:
+After major macOS updates, confirm that both managed lines still exist in `/etc/pf.conf`.
+
+On at least one confirmed machine, upgrading to macOS `26.4.1` removed the repo-managed `tailscale` anchor lines from `/etc/pf.conf`. The observed symptom was:
+
+- `tailscale ping` still worked
+- but app traffic such as `ssh <peer>` or `https://<peer>.your-tailnet.ts.net` timed out while Mullvad was on
+
+Check for the managed lines with:
 
 ```bash
 grep -Fx 'anchor "tailscale"' /etc/pf.conf
@@ -260,6 +267,14 @@ If either line is missing:
 
 ```bash
 sudo bash install.sh
+```
+
+That re-renders the anchor for the current Tailscale interface and restores the managed `pf.conf` block.
+
+If you want a quick post-upgrade sanity check after reinstalling, run:
+
+```bash
+sudo bash verify.sh --tailnet-target <peer> --magicdns-name <peer>.your-tailnet.ts.net
 ```
 
 If you want the full rationale for why this approach should be safe, where it can still fail, and how it compares to the Tailscale add-on, read [SECURITY.md](SECURITY.md).
