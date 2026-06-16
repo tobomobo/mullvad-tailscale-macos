@@ -94,6 +94,12 @@ So "peer reachable, but via DERP" is treated as a working tailnet connection wit
   Installs a system LaunchDaemon for `tailscaled` using `launchctl bootstrap`.
 - `uninstall-tailscaled-daemon.sh`
   Removes the repo-managed `tailscaled` LaunchDaemon.
+- `install-pf-watcher.sh`
+  Installs a LaunchDaemon that reattaches the PF anchor to Tailscale's current `utun` interface when it changes.
+- `uninstall-pf-watcher.sh`
+  Removes the pf-watcher LaunchDaemon and its installed payload.
+- `refresh-anchor.sh`
+  Re-renders and reloads the anchor for the active interface; runnable manually and used by the watcher.
 - `install-tailnet-resolver.sh`
   Installs an optional domain-scoped `/etc/resolver/<tailnet>.ts.net` override that points macOS apps at Tailscale MagicDNS.
 - `uninstall-tailnet-resolver.sh`
@@ -246,6 +252,34 @@ sudo killall -HUP mDNSResponder
 ```
 
 One practical note from real-world testing on macOS: a plain `dig <peer>.your-tailnet.ts.net` can disagree with the system resolver path that `curl` uses. If `curl https://<peer>.your-tailnet.ts.net` works but plain `dig` does not, prefer the `dscacheutil` and app-level result when diagnosing split DNS.
+
+## Keeping The Anchor Attached When Tailscale's Interface Changes
+
+The anchor is intentionally bound to Tailscale's active `utun` interface, which keeps the PF exception scoped to the tunnel. macOS can hand Tailscale a different `utun` number when it stops and restarts, which leaves the anchor pinned to the old interface until it is re-rendered.
+
+You have a few options, from simplest to most automatic:
+
+- Re-run `sudo bash install.sh` after a restart. It re-detects the interface and reattaches the anchor.
+- Keep `tailscaled` always running (`sudo bash install-tailscaled-daemon.sh`), which reduces how often the interface changes, though it does not guarantee the number survives every reboot, update, or crash.
+- Install the optional watcher so this is handled automatically:
+
+```bash
+sudo bash install-pf-watcher.sh
+```
+
+That installs a LaunchDaemon that runs `refresh-anchor.sh`. It re-checks Tailscale's interface periodically (about every two minutes) and also immediately when macOS rewrites its DNS resolver files. The periodic re-check is what actually guarantees recovery, since a Tailscale restart does not always change a watched file; expect reattachment within roughly the poll interval rather than instantly. When Tailscale has moved to a new `utun`, `refresh-anchor.sh` re-renders the anchor for that interface, validates it, and reloads the runtime anchor. It keeps the narrow interface binding rather than removing it, so it does not widen the PF exception to other interfaces.
+
+The watcher does not edit `/etc/pf.conf`; the `anchor` and `load anchor` lines still come from `install.sh`. Remove it with:
+
+```bash
+sudo bash uninstall-pf-watcher.sh
+```
+
+You can also run a one-off reattach yourself:
+
+```bash
+sudo bash refresh-anchor.sh
+```
 
 ## Maintenance
 

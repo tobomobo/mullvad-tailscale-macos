@@ -30,6 +30,13 @@ TAILSCALED_DAEMON_PLIST="${TAILSCALED_DAEMON_PLIST:-/Library/LaunchDaemons/com.t
 TAILSCALED_STDOUT_PATH="${TAILSCALED_STDOUT_PATH:-/var/log/tailscaled.log}"
 TAILSCALED_STDERR_PATH="${TAILSCALED_STDERR_PATH:-/var/log/tailscaled.err}"
 
+PF_WATCHER_LABEL="${PF_WATCHER_LABEL:-com.mullvad-tailscale-macos.pf-watcher}"
+PF_WATCHER_PLIST="${PF_WATCHER_PLIST:-/Library/LaunchDaemons/com.mullvad-tailscale-macos.pf-watcher.plist}"
+PF_WATCHER_INSTALL_DIR="${PF_WATCHER_INSTALL_DIR:-/Library/Application Support/mullvad-tailscale-macos}"
+PF_WATCHER_SCRIPT="${PF_WATCHER_SCRIPT:-$PF_WATCHER_INSTALL_DIR/refresh-anchor.sh}"
+PF_WATCHER_LOG="${PF_WATCHER_LOG:-/var/log/mullvad-tailscale-pf-watcher.log}"
+PF_WATCHER_INTERVAL="${PF_WATCHER_INTERVAL:-120}"
+
 TAILSCALE_IPV4_RANGE="100.64.0.0/10"
 TAILSCALE_IPV6_RANGE="fd7a:115c:a1e0::/48"
 TAILSCALE_MAGICDNS_SERVER="${TAILSCALE_MAGICDNS_SERVER:-100.100.100.100}"
@@ -352,23 +359,78 @@ validate_plist() {
   "$PLUTIL_BIN" -lint "$file" >/dev/null 2>&1
 }
 
-launchdaemon_service_target() {
-  echo "system/${TAILSCALED_DAEMON_LABEL}"
+write_pf_watcher_plist() {
+  local destination_file="$1"
+  local script_path="$2"
+
+  cat > "$destination_file" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>${PF_WATCHER_LABEL}</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>${script_path}</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>StartInterval</key>
+    <integer>${PF_WATCHER_INTERVAL}</integer>
+    <key>WatchPaths</key>
+    <array>
+        <string>/etc/resolv.conf</string>
+        <string>/var/run/resolv.conf</string>
+    </array>
+    <key>StandardOutPath</key>
+    <string>${PF_WATCHER_LOG}</string>
+    <key>StandardErrorPath</key>
+    <string>${PF_WATCHER_LOG}</string>
+</dict>
+</plist>
+EOF
 }
 
-launchdaemon_loaded() {
-  "$LAUNCHCTL_BIN" print "$(launchdaemon_service_target)" >/dev/null 2>&1
+launchd_service_target() {
+  echo "system/$1"
 }
 
-bootout_launchdaemon() {
-  if launchdaemon_loaded; then
-    "$LAUNCHCTL_BIN" bootout "$(launchdaemon_service_target)" >/dev/null 2>&1
+launchd_loaded() {
+  "$LAUNCHCTL_BIN" print "system/$1" >/dev/null 2>&1
+}
+
+bootout_launchd() {
+  local label="$1"
+
+  if launchd_loaded "$label"; then
+    "$LAUNCHCTL_BIN" bootout "system/$label" >/dev/null 2>&1
   fi
 }
 
+bootstrap_launchd() {
+  local plist="$1"
+  local label="$2"
+
+  "$LAUNCHCTL_BIN" bootstrap system "$plist" >/dev/null 2>&1
+  "$LAUNCHCTL_BIN" kickstart -k "system/$label" >/dev/null 2>&1
+}
+
+launchdaemon_service_target() {
+  launchd_service_target "$TAILSCALED_DAEMON_LABEL"
+}
+
+launchdaemon_loaded() {
+  launchd_loaded "$TAILSCALED_DAEMON_LABEL"
+}
+
+bootout_launchdaemon() {
+  bootout_launchd "$TAILSCALED_DAEMON_LABEL"
+}
+
 bootstrap_launchdaemon() {
-  "$LAUNCHCTL_BIN" bootstrap system "$TAILSCALED_DAEMON_PLIST" >/dev/null 2>&1
-  "$LAUNCHCTL_BIN" kickstart -k "$(launchdaemon_service_target)" >/dev/null 2>&1
+  bootstrap_launchd "$TAILSCALED_DAEMON_PLIST" "$TAILSCALED_DAEMON_LABEL"
 }
 
 resolver_file_for_domain() {
