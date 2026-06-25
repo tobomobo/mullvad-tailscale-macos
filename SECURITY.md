@@ -148,6 +148,12 @@ If app-level hostname access is still failing in that scenario, inspect macOS re
 
 This is also why the repo's active verifier should treat "TSMP reachability works, but DISCO direct path failed" as a warning rather than a hard failure. A DERP fallback means tailnet connectivity still works; it does not mean the PF fix failed.
 
+## Keeping The Interface Binding Without Widening It
+
+A natural temptation when Tailscale's `utun` number changes is to drop the interface from the anchor rules so they match on any interface. This repo deliberately does not do that by default: `100.64.0.0/10` is RFC 6598 CGNAT space that some networks use on the physical link, so an interface-independent `pass` rule would widen the kill-switch exception beyond the tunnel.
+
+Instead, the optional `install-pf-watcher.sh` LaunchDaemon reattaches the anchor to Tailscale's current interface, using the same render, validate, and reload path as `install.sh`. It re-checks periodically (about every two minutes, which is what guarantees recovery) and also when the DNS resolver configuration changes, so reattachment happens within roughly the poll interval rather than instantly. That keeps the exception scoped to the active Tailscale tunnel while staying robust to interface renumbering. It reloads only the runtime anchor and does not modify `/etc/pf.conf`.
+
 ## Failure Modes And Limits
 
 This repo reduces risk, but it does not remove all operational risk.
@@ -155,7 +161,7 @@ This repo reduces risk, but it does not remove all operational risk.
 Things that can still go wrong:
 
 - Tailscale is not running when `install.sh` executes, so interface auto-detection fails
-- macOS reassigns Tailscale to a different `utun` interface later
+- macOS reassigns Tailscale to a different `utun` interface later (mitigated by the optional pf-watcher)
 - a major macOS update resets `/etc/pf.conf`
 - a Mullvad or macOS DNS-path change makes tailnet hostnames unreliable until a domain-scoped resolver override is installed
 - live PF behavior on a given host differs from the stubbed smoke tests in this repo
@@ -167,6 +173,7 @@ The repo tries to reduce those risks by:
 - validating staged `pf.conf` before reload
 - restoring the previous `pf.conf` automatically if PF rejects the new config
 - providing `verify.sh` for PF checks, optional resolver-override checks, and optional active checks
+- offering an optional pf-watcher LaunchDaemon that reattaches the anchor to Tailscale's current interface without widening the exception
 
 ## Why This Repo Uses Standalone Mullvad Instead Of The Tailscale Mullvad Add-On
 

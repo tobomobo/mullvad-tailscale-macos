@@ -67,6 +67,10 @@ if [[ "${PFCTL_FAIL_RELOAD:-0}" == "1" && "${1:-}" == "-f" && "${2:-}" == "$PF_C
   exit 1
 fi
 
+if [[ "${PFCTL_FAIL_ANCHOR_LOAD:-0}" == "1" && "${1:-}" == "-a" && "${3:-}" == "-f" ]]; then
+  exit 1
+fi
+
 exit 0
 EOF
 
@@ -93,6 +97,7 @@ EOF
 
   cat > "$bin_dir/chmod" <<'EOF'
 #!/bin/bash
+printf '%s\n' "$*" >> "$TEST_LOG_DIR/chmod.calls"
 exit 0
 EOF
 
@@ -287,6 +292,55 @@ run_resolver_uninstall_env() {
   KILLALL_BIN="$bin_dir/killall" \
   CP_BIN="cp" \
   bash "$ROOT_DIR/uninstall-tailnet-resolver.sh" "$@"
+}
+
+run_pf_watcher_install_env() {
+  local workspace="$1"
+  shift
+
+  local bin_dir="$workspace/bin"
+  TEST_LOG_DIR="$workspace/logs" \
+  SKIP_ROOT_CHECK=1 \
+  PF_WATCHER_INSTALL_DIR="$workspace/watcher" \
+  PF_WATCHER_PLIST="$workspace/com.mullvad-tailscale-macos.pf-watcher.plist" \
+  PF_WATCHER_LOG="$workspace/pf-watcher.log" \
+  PLUTIL_BIN="$bin_dir/plutil" \
+  LAUNCHCTL_BIN="$bin_dir/launchctl" \
+  CHOWN_BIN="$bin_dir/chown" \
+  CHMOD_BIN="$bin_dir/chmod" \
+  CP_BIN="cp" \
+  bash "$ROOT_DIR/install-pf-watcher.sh" "$@"
+}
+
+run_pf_watcher_uninstall_env() {
+  local workspace="$1"
+  shift
+
+  local bin_dir="$workspace/bin"
+  TEST_LOG_DIR="$workspace/logs" \
+  SKIP_ROOT_CHECK=1 \
+  PF_WATCHER_INSTALL_DIR="$workspace/watcher" \
+  PF_WATCHER_PLIST="$workspace/com.mullvad-tailscale-macos.pf-watcher.plist" \
+  LAUNCHCTL_BIN="$bin_dir/launchctl" \
+  RM_BIN="rm" \
+  bash "$ROOT_DIR/uninstall-pf-watcher.sh" "$@"
+}
+
+run_refresh_env() {
+  local workspace="$1"
+  shift
+
+  local bin_dir="$workspace/bin"
+  TEST_LOG_DIR="$workspace/logs" \
+  IFCONFIG_FIXTURES_DIR="$workspace/ifconfig" \
+  SKIP_ROOT_CHECK=1 \
+  ANCHOR_FILE="$workspace/pf.anchors/tailscale" \
+  PFCTL_BIN="$bin_dir/pfctl" \
+  IFCONFIG_BIN="$bin_dir/ifconfig" \
+  CHOWN_BIN="$bin_dir/chown" \
+  CHMOD_BIN="$bin_dir/chmod" \
+  CP_BIN="cp" \
+  bash "$ROOT_DIR/refresh-anchor.sh" "$@"
 }
 
 new_workspace() {
@@ -910,6 +964,142 @@ test_daemon_uninstaller_boots_out_and_removes_plist() {
   pass "daemon uninstaller unloads and removes the plist"
 }
 
+test_pf_watcher_installer_installs_payload_and_bootstraps() {
+  local workspace
+  workspace="$(new_workspace pf-watcher-install)"
+
+  run_pf_watcher_install_env "$workspace"
+
+  assert_file_contains "$workspace/watcher/refresh-anchor.sh" "Reattached the PF anchor"
+  [[ -f "$workspace/watcher/lib/common.sh" ]] || fail "Expected lib/common.sh in the watcher payload"
+  assert_file_contains "$workspace/watcher/etc/pf.anchors/tailscale" "__TAILSCALE_INTERFACE__"
+  assert_file_contains "$workspace/com.mullvad-tailscale-macos.pf-watcher.plist" "com.mullvad-tailscale-macos.pf-watcher"
+  assert_file_contains "$workspace/com.mullvad-tailscale-macos.pf-watcher.plist" "$workspace/watcher/refresh-anchor.sh"
+  assert_file_contains "$workspace/com.mullvad-tailscale-macos.pf-watcher.plist" "/var/run/resolv.conf"
+  grep -Fxq "755 $workspace/watcher" "$workspace/logs/chmod.calls" || fail "Expected the payload dir itself to be chmod 755 (root runs scripts from it on a timer)"
+  assert_file_contains "$workspace/logs/launchctl.calls" "bootstrap system $workspace/com.mullvad-tailscale-macos.pf-watcher.plist"
+  assert_file_contains "$workspace/logs/launchctl.calls" "kickstart -k system/com.mullvad-tailscale-macos.pf-watcher"
+  pass "pf-watcher installer installs the payload, writes the plist, and bootstraps it"
+}
+
+test_pf_watcher_uninstaller_boots_out_and_removes() {
+  local workspace
+  workspace="$(new_workspace pf-watcher-uninstall)"
+
+  mkdir -p "$workspace/watcher/lib"
+  : > "$workspace/watcher/refresh-anchor.sh"
+  touch "$workspace/com.mullvad-tailscale-macos.pf-watcher.plist"
+
+  LAUNCHCTL_PRINT_EXIT=0 run_pf_watcher_uninstall_env "$workspace"
+
+  assert_file_contains "$workspace/logs/launchctl.calls" "bootout system/com.mullvad-tailscale-macos.pf-watcher"
+  [[ ! -f "$workspace/com.mullvad-tailscale-macos.pf-watcher.plist" ]] || fail "Expected the pf-watcher plist to be removed"
+  [[ ! -d "$workspace/watcher" ]] || fail "Expected the watcher payload directory to be removed"
+  pass "pf-watcher uninstaller unloads, removes the plist, and removes the payload"
+}
+
+test_refresh_reattaches_anchor_on_interface_change() {
+  local workspace
+  workspace="$(new_workspace refresh-change)"
+
+  cat > "$workspace/pf.anchors/tailscale" <<'EOF'
+pass out quick on utun5 inet from any to 100.64.0.0/10 no state
+pass in quick on utun5 inet from 100.64.0.0/10 to any no state
+pass out quick on utun5 inet6 from any to fd7a:115c:a1e0::/48 no state
+pass in quick on utun5 inet6 from fd7a:115c:a1e0::/48 to any no state
+EOF
+
+  cat > "$workspace/ifconfig/utun9" <<'EOF'
+utun9: flags=8051<UP,POINTOPOINT,RUNNING,MULTICAST> mtu 1280
+	inet 100.82.1.2 --> 100.82.1.2 netmask 0xffffffff
+EOF
+
+  IFCONFIG_LIST="lo0 utun9" \
+  PFCTL_ANCHOR_RULES="pass out quick on utun5 inet from any to 100.64.0.0/10 no state" \
+  run_refresh_env "$workspace"
+
+  assert_file_contains "$workspace/pf.anchors/tailscale" "pass out quick on utun9 inet from any to 100.64.0.0/10 no state"
+  assert_file_not_contains "$workspace/pf.anchors/tailscale" "on utun5 "
+  assert_file_contains "$workspace/logs/pfctl.calls" "-a tailscale -f $workspace/pf.anchors/tailscale"
+  pass "refresh reattaches the anchor when Tailscale's interface changes"
+}
+
+test_refresh_noop_when_interface_unchanged() {
+  local workspace
+  workspace="$(new_workspace refresh-noop)"
+
+  cat > "$workspace/pf.anchors/tailscale" <<'EOF'
+pass out quick on utun7 inet from any to 100.64.0.0/10 no state
+pass in quick on utun7 inet from 100.64.0.0/10 to any no state
+pass out quick on utun7 inet6 from any to fd7a:115c:a1e0::/48 no state
+pass in quick on utun7 inet6 from fd7a:115c:a1e0::/48 to any no state
+EOF
+
+  cat > "$workspace/ifconfig/utun7" <<'EOF'
+utun7: flags=8051<UP,POINTOPOINT,RUNNING,MULTICAST> mtu 1280
+	inet 100.82.1.2 --> 100.82.1.2 netmask 0xffffffff
+EOF
+
+  output="$(
+    IFCONFIG_LIST="lo0 utun7" \
+    PFCTL_ANCHOR_RULES="pass out quick on utun7 inet from any to 100.64.0.0/10 no state" \
+    run_refresh_env "$workspace"
+  )"
+
+  [[ -z "$output" ]] || fail "Expected refresh to stay quiet on a no-op poll (non-interactive), got: $output"
+  assert_file_not_contains "$workspace/logs/pfctl.calls" "-f $workspace/pf.anchors/tailscale"
+  pass "refresh is a quiet no-op when the anchor already targets the active interface"
+}
+
+test_refresh_reattaches_when_runtime_anchor_empty() {
+  local workspace
+  workspace="$(new_workspace refresh-runtime-empty)"
+
+  cat > "$workspace/pf.anchors/tailscale" <<'EOF'
+pass out quick on utun7 inet from any to 100.64.0.0/10 no state
+pass in quick on utun7 inet from 100.64.0.0/10 to any no state
+pass out quick on utun7 inet6 from any to fd7a:115c:a1e0::/48 no state
+pass in quick on utun7 inet6 from fd7a:115c:a1e0::/48 to any no state
+EOF
+
+  cat > "$workspace/ifconfig/utun7" <<'EOF'
+utun7: flags=8051<UP,POINTOPOINT,RUNNING,MULTICAST> mtu 1280
+	inet 100.82.1.2 --> 100.82.1.2 netmask 0xffffffff
+EOF
+
+  # Interface still matches the anchor file, but the runtime anchor is empty
+  # (the post-reboot / post-`pfctl -f` case). Refresh must reattach, not no-op.
+  output="$(
+    IFCONFIG_LIST="lo0 utun7" \
+    PFCTL_ANCHOR_RULES="" \
+    run_refresh_env "$workspace"
+  )"
+
+  grep -Fq "Reattached the PF anchor to utun7" <<<"$output" || fail "Expected refresh to reattach when the runtime anchor is empty"
+  assert_file_contains "$workspace/logs/pfctl.calls" "-a tailscale -f $workspace/pf.anchors/tailscale"
+  pass "refresh reattaches when the interface matches but the runtime anchor is empty"
+}
+
+test_refresh_fails_when_runtime_reload_fails() {
+  local workspace
+  workspace="$(new_workspace refresh-load-fail)"
+
+  cat > "$workspace/pf.anchors/tailscale" <<'EOF'
+pass out quick on utun5 inet from any to 100.64.0.0/10 no state
+EOF
+
+  cat > "$workspace/ifconfig/utun9" <<'EOF'
+utun9: flags=8051<UP,POINTOPOINT,RUNNING,MULTICAST> mtu 1280
+	inet 100.82.1.2 --> 100.82.1.2 netmask 0xffffffff
+EOF
+
+  IFCONFIG_LIST="lo0 utun9" \
+  PFCTL_FAIL_ANCHOR_LOAD=1 \
+  run_refresh_env "$workspace" >/dev/null 2>&1 && fail "refresh should fail when reloading the runtime anchor fails"
+
+  pass "refresh fails loudly when reloading the runtime anchor fails"
+}
+
 test_install_detects_interface_and_writes_anchor
 test_install_repairs_partial_anchor_block
 test_install_rolls_back_failed_pf_reload
@@ -933,6 +1123,12 @@ test_resolver_uninstaller_removes_file_and_flushes_dns
 test_resolver_uninstaller_refuses_unmanaged_existing_file
 test_daemon_installer_bootstraps_launchdaemon
 test_daemon_uninstaller_boots_out_and_removes_plist
+test_pf_watcher_installer_installs_payload_and_bootstraps
+test_pf_watcher_uninstaller_boots_out_and_removes
+test_refresh_reattaches_anchor_on_interface_change
+test_refresh_noop_when_interface_unchanged
+test_refresh_reattaches_when_runtime_anchor_empty
+test_refresh_fails_when_runtime_reload_fails
 
 echo ""
 echo "All tests passed ($PASS_COUNT checks)."

@@ -26,6 +26,12 @@ If you are an agent making changes here, optimize for safety first. This repo mo
   Installs the managed LaunchDaemon using `launchctl bootstrap`.
 - `uninstall-tailscaled-daemon.sh`
   Removes the managed LaunchDaemon.
+- `install-pf-watcher.sh`
+  Installs a LaunchDaemon that reattaches the anchor to Tailscale's current interface on network changes, keeping the interface binding instead of widening the exception.
+- `uninstall-pf-watcher.sh`
+  Removes the pf-watcher LaunchDaemon and its installed payload.
+- `refresh-anchor.sh`
+  Reattaches the anchor for the active interface using the same validate/reload path as install; runnable manually and used by the watcher.
 - `install-tailnet-resolver.sh`
   Installs an optional domain-scoped MagicDNS resolver override for a tailnet.
 - `uninstall-tailnet-resolver.sh`
