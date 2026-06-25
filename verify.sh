@@ -190,7 +190,7 @@ if command -v "$SCUTIL_BIN" >/dev/null 2>&1; then
       warn "System DNS uses a Mullvad content-blocker address ($(join_lines "$blocker_dns")) inside $TAILSCALE_IPV4_RANGE; this collides with Tailscale's range whenever Tailscale is running. See README: 'Mullvad DNS Content Blockers'."
     fi
   else
-    pass "No Mullvad content-blocker DNS collision detected (no system resolver inside $TAILSCALE_IPV4_RANGE)"
+    pass "No Mullvad content-blocker DNS collision detected (no 100.64.0.1-63 content-blocker resolver configured)"
   fi
 else
   warn "scutil not found; skipping Mullvad content-blocker DNS collision check"
