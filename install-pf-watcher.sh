@@ -39,7 +39,13 @@ for required in refresh-anchor.sh lib/common.sh etc/pf.anchors/tailscale; do
 done
 
 echo "Installing watcher payload to $PF_WATCHER_INSTALL_DIR ..."
-"$MKDIR_BIN" -p "$PF_WATCHER_INSTALL_DIR/lib" "$PF_WATCHER_INSTALL_DIR/etc/pf.anchors"
+# root runs refresh-anchor.sh and sources lib/common.sh from this directory on a
+# timer, so lock it down to root:wheel even if the parent (or a pre-existing
+# directory) had looser permissions, rather than relying on the umask.
+install_root_owned_dir "$PF_WATCHER_INSTALL_DIR"
+install_root_owned_dir "$PF_WATCHER_INSTALL_DIR/lib"
+install_root_owned_dir "$PF_WATCHER_INSTALL_DIR/etc"
+install_root_owned_dir "$PF_WATCHER_INSTALL_DIR/etc/pf.anchors"
 install_root_owned_file "$SCRIPT_DIR/refresh-anchor.sh" "$PF_WATCHER_INSTALL_DIR/refresh-anchor.sh" 755
 install_root_owned_file "$SCRIPT_DIR/lib/common.sh" "$PF_WATCHER_INSTALL_DIR/lib/common.sh" 644
 install_root_owned_file "$SCRIPT_DIR/etc/pf.anchors/tailscale" "$PF_WATCHER_INSTALL_DIR/etc/pf.anchors/tailscale" 644

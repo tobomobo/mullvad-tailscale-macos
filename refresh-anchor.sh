@@ -4,6 +4,16 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/lib/common.sh"
 
+# Routine "nothing changed" status lines would otherwise be appended to the
+# pf-watcher log on every poll (the daemon re-checks about every two minutes),
+# growing it without bound. Only print them on an interactive terminal;
+# actionable output (reattachment, errors via die) is always shown.
+log_routine() {
+  if [[ -t 1 ]]; then
+    echo "$@"
+  fi
+}
+
 usage() {
   cat <<EOF
 Usage: sudo bash refresh-anchor.sh [--interface utunX]
@@ -44,7 +54,7 @@ if [[ ! -f "$ANCHOR_TEMPLATE" ]]; then
 fi
 
 interface="$(detect_tailscale_interface)" || {
-  echo "No active Tailscale utun interface detected; leaving the anchor unchanged."
+  log_routine "No active Tailscale utun interface detected; leaving the anchor unchanged."
   exit 0
 }
 
@@ -56,7 +66,7 @@ fi
 runtime_rules="$("$PFCTL_BIN" -a "$TAILSCALE_ANCHOR_NAME" -sr 2>/dev/null || true)"
 
 if [[ "$installed_interface" == "$interface" && -f "$ANCHOR_FILE" && -n "$runtime_rules" ]]; then
-  echo "Anchor already targets $interface and is loaded; nothing to do."
+  log_routine "Anchor already targets $interface and is loaded; nothing to do."
   exit 0
 fi
 

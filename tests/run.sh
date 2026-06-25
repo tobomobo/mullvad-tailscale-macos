@@ -97,6 +97,7 @@ EOF
 
   cat > "$bin_dir/chmod" <<'EOF'
 #!/bin/bash
+printf '%s\n' "$*" >> "$TEST_LOG_DIR/chmod.calls"
 exit 0
 EOF
 
@@ -871,6 +872,7 @@ test_pf_watcher_installer_installs_payload_and_bootstraps() {
   assert_file_contains "$workspace/com.mullvad-tailscale-macos.pf-watcher.plist" "com.mullvad-tailscale-macos.pf-watcher"
   assert_file_contains "$workspace/com.mullvad-tailscale-macos.pf-watcher.plist" "$workspace/watcher/refresh-anchor.sh"
   assert_file_contains "$workspace/com.mullvad-tailscale-macos.pf-watcher.plist" "/var/run/resolv.conf"
+  grep -Fxq "755 $workspace/watcher" "$workspace/logs/chmod.calls" || fail "Expected the payload dir itself to be chmod 755 (root runs scripts from it on a timer)"
   assert_file_contains "$workspace/logs/launchctl.calls" "bootstrap system $workspace/com.mullvad-tailscale-macos.pf-watcher.plist"
   assert_file_contains "$workspace/logs/launchctl.calls" "kickstart -k system/com.mullvad-tailscale-macos.pf-watcher"
   pass "pf-watcher installer installs the payload, writes the plist, and bootstraps it"
@@ -940,9 +942,9 @@ EOF
     run_refresh_env "$workspace"
   )"
 
-  grep -Fq "nothing to do" <<<"$output" || fail "Expected refresh to be a no-op when the interface is unchanged"
+  [[ -z "$output" ]] || fail "Expected refresh to stay quiet on a no-op poll (non-interactive), got: $output"
   assert_file_not_contains "$workspace/logs/pfctl.calls" "-f $workspace/pf.anchors/tailscale"
-  pass "refresh is a no-op when the anchor already targets the active interface"
+  pass "refresh is a quiet no-op when the anchor already targets the active interface"
 }
 
 test_refresh_reattaches_when_runtime_anchor_empty() {

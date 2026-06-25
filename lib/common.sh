@@ -270,6 +270,15 @@ install_root_owned_file() {
   "$CHMOD_BIN" "$file_mode" "$destination_file"
 }
 
+install_root_owned_dir() {
+  local dir="$1"
+  local dir_mode="${2:-755}"
+
+  "$MKDIR_BIN" -p "$dir"
+  "$CHOWN_BIN" root:wheel "$dir"
+  "$CHMOD_BIN" "$dir_mode" "$dir"
+}
+
 validate_anchor_file() {
   local file="$1"
 
