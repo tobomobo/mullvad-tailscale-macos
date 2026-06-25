@@ -188,6 +188,28 @@ To verify that optional resolver override after installation:
 sudo bash verify.sh --tailnet-domain your-tailnet.ts.net --magicdns-name <peer>.your-tailnet.ts.net
 ```
 
+## Mullvad DNS Content Blockers
+
+Mullvad's in-app content blockers (ads, trackers, malware, and so on) do not work while Tailscale is running, and this is not something the PF anchor can fix.
+
+When you enable a content blocker, the Mullvad app points your in-tunnel DNS at an address in `100.64.0.x` (a bitmask: ads=1, trackers=2, malware=4, adult=8, gambling=16, social=32, so for example `100.64.0.1`, `100.64.0.3`, `100.64.0.7`). That address sits inside Tailscale's `100.64.0.0/10` CGNAT range. Tailscale claims that range while it is up, so those DNS queries collide with Tailscale and stop resolving.
+
+Mullvad's default DNS is `10.64.0.1`, which is in a different range, so `mullvad dns set default` keeps working. That is why the rest of this setup is expected to work only with Mullvad's default DNS.
+
+You can confirm the collision on your own machine:
+
+```bash
+scutil --dns | grep nameserver   # is a 100.64.0.x resolver configured?
+route -n get 100.64.0.1          # which interface owns it?
+```
+
+`verify.sh` also warns if it sees a `100.64.0.x` system resolver.
+
+If you want content blocking alongside Tailscale, use a path that does not live in the CGNAT range:
+
+- Mullvad's public encrypted-DNS blockers, configured as DoH/DoT (not as a plain `/etc/resolver` nameserver): `194.242.2.3` (ads + trackers), `194.242.2.4` (+ malware), `194.242.2.9` (all categories). These are normal public addresses reached through the Mullvad tunnel, so they do not overlap Tailscale's range.
+- Or do the blocking at the Tailscale DNS layer instead, for example a blocking upstream resolver such as NextDNS set as a global nameserver in the Tailscale admin console. That keeps DNS on `100.100.100.100`, which already coexists with this setup.
+
 ## Same Wi-Fi, MagicDNS, and Direct Connections
 
 If two devices are on the same Wi-Fi:

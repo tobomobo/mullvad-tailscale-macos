@@ -12,6 +12,7 @@ PGREP_BIN="${PGREP_BIN:-pgrep}"
 CURL_BIN="${CURL_BIN:-curl}"
 DIG_BIN="${DIG_BIN:-dig}"
 DSCACHEUTIL_BIN="${DSCACHEUTIL_BIN:-dscacheutil}"
+SCUTIL_BIN="${SCUTIL_BIN:-scutil}"
 KILLALL_BIN="${KILLALL_BIN:-killall}"
 LAUNCHCTL_BIN="${LAUNCHCTL_BIN:-launchctl}"
 PLUTIL_BIN="${PLUTIL_BIN:-plutil}"
@@ -33,6 +34,12 @@ TAILSCALED_STDERR_PATH="${TAILSCALED_STDERR_PATH:-/var/log/tailscaled.err}"
 TAILSCALE_IPV4_RANGE="100.64.0.0/10"
 TAILSCALE_IPV6_RANGE="fd7a:115c:a1e0::/48"
 TAILSCALE_MAGICDNS_SERVER="${TAILSCALE_MAGICDNS_SERVER:-100.100.100.100}"
+
+# Mullvad's in-app content blockers point system DNS at 100.64.0.<bitmask>
+# (ads=1, trackers=2, malware=4, adult=8, gambling=16, social=32; max 63), which
+# sits inside Tailscale's 100.64.0.0/10 range, so the two collide while Tailscale
+# is up. Matches 100.64.0.1 through 100.64.0.63.
+MULLVAD_BLOCKER_DNS_REGEX="^100\\.64\\.0\\.([1-9]|[1-5][0-9]|6[0-3])\$"
 TAILNET_RESOLVER_COMMENT="# Managed by install-tailnet-resolver.sh"
 ANCHOR_COMMENT="# Tailscale anchor - allow tailnet traffic through Mullvad kill switch"
 ANCHOR_LINE="anchor \"$TAILSCALE_ANCHOR_NAME\""
@@ -163,6 +170,36 @@ hosts_file_lookup() {
       }
     }
   ' "$file" 2>/dev/null || true
+}
+
+system_dns_servers() {
+  "$SCUTIL_BIN" --dns 2>/dev/null | awk '
+    /nameserver\[[0-9]+\]/ {
+      ip = $NF
+      if (ip ~ /^[0-9A-Fa-f:.]+$/ && !seen[ip]++) {
+        print ip
+      }
+    }
+  '
+}
+
+dns_server_is_mullvad_blocker() {
+  local ip="$1"
+
+  [[ "$ip" =~ $MULLVAD_BLOCKER_DNS_REGEX ]]
+}
+
+mullvad_blocker_dns_in_use() {
+  local ip
+
+  while IFS= read -r ip; do
+    [[ -n "$ip" ]] || continue
+    if dns_server_is_mullvad_blocker "$ip"; then
+      echo "$ip"
+    fi
+  done < <(system_dns_servers)
+
+  return 0
 }
 
 detect_tailscale_interface() {
