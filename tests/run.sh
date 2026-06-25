@@ -151,6 +151,12 @@ printf '%s\n' "${DSCACHEUTIL_OUTPUT:-}"
 exit "${DSCACHEUTIL_EXIT:-0}"
 EOF
 
+  cat > "$bin_dir/scutil" <<'EOF'
+#!/bin/bash
+printf '%s\n' "${SCUTIL_OUTPUT:-}"
+exit "${SCUTIL_EXIT:-0}"
+EOF
+
   cat > "$bin_dir/killall" <<'EOF'
 #!/bin/bash
 printf '%s\n' "$*" >> "$TEST_LOG_DIR/killall.calls"
@@ -222,6 +228,7 @@ run_verify_env() {
   CURL_BIN="$bin_dir/curl" \
   DIG_BIN="$bin_dir/dig" \
   DSCACHEUTIL_BIN="$bin_dir/dscacheutil" \
+  SCUTIL_BIN="$bin_dir/scutil" \
   KILLALL_BIN="$bin_dir/killall" \
   HOSTS_FILE="$workspace/hosts" \
   TAILSCALE_BIN="$bin_dir/tailscale" \
@@ -770,6 +777,103 @@ EOF
   pass "verify warns when an optional requested tailnet resolver override is missing"
 }
 
+test_verify_warns_on_mullvad_content_blocker_dns() {
+  local workspace
+  workspace="$(new_workspace verify-blocker-dns)"
+
+  cat > "$workspace/pf.conf" <<EOF
+set skip on lo0
+anchor "tailscale"
+load anchor "tailscale" from "$workspace/pf.anchors/tailscale"
+EOF
+
+  cat > "$workspace/pf.anchors/tailscale" <<'EOF'
+pass out quick on utun7 inet from any to 100.64.0.0/10 no state
+pass in quick on utun7 inet from 100.64.0.0/10 to any no state
+pass out quick on utun7 inet6 from any to fd7a:115c:a1e0::/48 no state
+pass in quick on utun7 inet6 from fd7a:115c:a1e0::/48 to any no state
+EOF
+
+  cat > "$workspace/ifconfig/utun7" <<'EOF'
+utun7: flags=8051<UP,POINTOPOINT,RUNNING,MULTICAST> mtu 1280
+	inet 100.82.1.2 --> 100.82.1.2 netmask 0xffffffff
+EOF
+
+  touch "$workspace/com.tailscale.tailscaled.plist"
+
+  output="$(
+    IFCONFIG_LIST="lo0 utun7" \
+    PGREP_TAILSCALED_EXIT=0 \
+    PGREP_MULLVAD_EXIT=0 \
+    CURL_OUTPUT="You are connected to Mullvad" \
+    SCUTIL_OUTPUT="  nameserver[0] : 100.64.0.3" \
+    run_verify_env "$workspace"
+  )"
+
+  grep -Fq "content-blocker address (100.64.0.3)" <<<"$output" || fail "Expected a Mullvad content-blocker DNS warning naming 100.64.0.3"
+  pass "verify warns when system DNS is a Mullvad content-blocker address in Tailscale's range"
+}
+
+test_verify_ignores_non_blocker_dns() {
+  local workspace
+  workspace="$(new_workspace verify-default-dns)"
+
+  cat > "$workspace/pf.conf" <<EOF
+set skip on lo0
+anchor "tailscale"
+load anchor "tailscale" from "$workspace/pf.anchors/tailscale"
+EOF
+
+  cat > "$workspace/pf.anchors/tailscale" <<'EOF'
+pass out quick on utun7 inet from any to 100.64.0.0/10 no state
+pass in quick on utun7 inet from 100.64.0.0/10 to any no state
+pass out quick on utun7 inet6 from any to fd7a:115c:a1e0::/48 no state
+pass in quick on utun7 inet6 from fd7a:115c:a1e0::/48 to any no state
+EOF
+
+  cat > "$workspace/ifconfig/utun7" <<'EOF'
+utun7: flags=8051<UP,POINTOPOINT,RUNNING,MULTICAST> mtu 1280
+	inet 100.82.1.2 --> 100.82.1.2 netmask 0xffffffff
+EOF
+
+  touch "$workspace/com.tailscale.tailscaled.plist"
+
+  output="$(
+    IFCONFIG_LIST="lo0 utun7" \
+    PGREP_TAILSCALED_EXIT=0 \
+    PGREP_MULLVAD_EXIT=0 \
+    CURL_OUTPUT="You are connected to Mullvad" \
+    SCUTIL_OUTPUT="  nameserver[0] : 10.64.0.1" \
+    run_verify_env "$workspace"
+  )"
+
+  grep -Fq "No Mullvad content-blocker DNS collision detected" <<<"$output" || fail "Expected the no-collision pass for Mullvad default DNS"
+  if grep -Fq "content-blocker address" <<<"$output"; then
+    fail "Did not expect a content-blocker warning for Mullvad default DNS 10.64.0.1"
+  fi
+  pass "verify does not warn for Mullvad default DNS (10.64.0.1)"
+}
+
+test_blocker_dns_classifier_boundaries() {
+  local out
+  if ! out="$(
+    ROOT_DIR="$ROOT_DIR" bash -c '
+      source "$ROOT_DIR/lib/common.sh"
+      rc=0
+      for ip in 100.64.0.1 100.64.0.3 100.64.0.7 100.64.0.10 100.64.0.63; do
+        dns_server_is_mullvad_blocker "$ip" || { echo "should-accept $ip"; rc=1; }
+      done
+      for ip in 100.64.0.0 100.64.0.64 100.64.0.255 10.64.0.1 100.100.100.100 192.168.0.1; do
+        dns_server_is_mullvad_blocker "$ip" && { echo "should-reject $ip"; rc=1; }
+      done
+      exit $rc
+    ' 2>&1
+  )"; then
+    fail "Blocker DNS classifier misclassified: $out"
+  fi
+  pass "Mullvad content-blocker DNS classifier accepts 100.64.0.1-63 and rejects everything else"
+}
+
 test_resolver_installer_writes_file_and_flushes_dns() {
   local workspace
   workspace="$(new_workspace resolver-install)"
@@ -1009,6 +1113,9 @@ test_verify_warns_on_hosts_override
 test_verify_accepts_externally_managed_tailscaled
 test_verify_followups_only_suggest_resolver_for_tailnet_domains
 test_verify_warns_when_tailnet_resolver_override_is_missing
+test_verify_warns_on_mullvad_content_blocker_dns
+test_verify_ignores_non_blocker_dns
+test_blocker_dns_classifier_boundaries
 test_resolver_installer_writes_file_and_flushes_dns
 test_resolver_installer_refuses_unmanaged_existing_file
 test_resolver_installer_propagates_flush_failures

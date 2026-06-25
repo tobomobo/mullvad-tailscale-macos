@@ -180,7 +180,23 @@ else
   warn "Managed tailscaled LaunchDaemon plist not found"
 fi
 
-echo "6. Active checks"
+echo "6. Mullvad content-blocker DNS"
+if command -v "$SCUTIL_BIN" >/dev/null 2>&1; then
+  blocker_dns="$(mullvad_blocker_dns_in_use)"
+  if [[ -n "$blocker_dns" ]]; then
+    if [[ -n "$active_interface" ]]; then
+      warn "System DNS uses a Mullvad content-blocker address ($(join_lines "$blocker_dns")) inside Tailscale's $TAILSCALE_IPV4_RANGE range; Tailscale owns that range while it is up, so content-blocker DNS is expected to fail. See README: 'Mullvad DNS Content Blockers'."
+    else
+      warn "System DNS uses a Mullvad content-blocker address ($(join_lines "$blocker_dns")) inside $TAILSCALE_IPV4_RANGE; this collides with Tailscale's range whenever Tailscale is running. See README: 'Mullvad DNS Content Blockers'."
+    fi
+  else
+    pass "No Mullvad content-blocker DNS collision detected (no 100.64.0.1-63 content-blocker resolver configured)"
+  fi
+else
+  warn "scutil not found; skipping Mullvad content-blocker DNS collision check"
+fi
+
+echo "7. Active checks"
 if [[ -n "$TAILNET_DOMAIN" ]]; then
   if validate_tailnet_domain "$TAILNET_DOMAIN"; then
     resolver_file="$(resolver_file_for_domain "$TAILNET_DOMAIN")"

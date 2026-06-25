@@ -116,6 +116,12 @@ This is materially different from `/etc/hosts`:
 
 This resolver override is system-wide, so once an admin installs it, non-admin users on the same Mac should benefit from it too. The helper installs it as a root-owned but readable file, which keeps the policy inspectable without making it user-writable.
 
+## Mullvad Content Blockers And The CGNAT Range
+
+Mullvad's in-app content blockers move system DNS into `100.64.0.x`, which overlaps Tailscale's `100.64.0.0/10` range. While Tailscale is running, those blocker queries collide with Tailscale and are expected to fail. This is an address-range ownership conflict between two products, not something this PF anchor changes or can fix.
+
+The anchor does not widen any exception to make content-blocker DNS work, and the repo deliberately does not try to route `100.64.0.x` around Tailscale with fragile host routes. The position here is to document the conflict and recommend non-overlapping content blocking (Mullvad's public DoH/DoT endpoints, or a blocking upstream at the Tailscale DNS layer). See the README section "Mullvad DNS Content Blockers".
+
 ## MagicDNS, Same-LAN Peers, And DERP
 
 MagicDNS resolves peer names to Tailscale addresses, not LAN addresses. That means a same-Wi-Fi connection to `host.ts.net` still depends on Tailscale traffic being allowed by PF.
