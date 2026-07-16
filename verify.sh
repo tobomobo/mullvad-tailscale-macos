@@ -96,6 +96,16 @@ if [[ -f "$ANCHOR_FILE" ]]; then
   installed_interface="$(anchor_interface_from_file "$ANCHOR_FILE")"
   if [[ -n "$installed_interface" ]]; then
     pass "Installed anchor targets $installed_interface"
+    if anchor_file_managed_by_repo "$ANCHOR_FILE"; then
+      pass "Anchor file has a recognized ownership marker and the exact four-rule policy"
+    else
+      fail "$ANCHOR_FILE is unmarked or contains rules outside the exact managed policy"
+    fi
+    if file_is_root_owned_and_not_writable "$ANCHOR_FILE"; then
+      pass "Anchor file is root-owned and not writable by group or other users"
+    else
+      fail "$ANCHOR_FILE is not safely owned or has unsafe write permissions"
+    fi
   else
     fail "Unable to determine interface from $ANCHOR_FILE"
   fi
@@ -105,16 +115,10 @@ else
 fi
 
 echo "2. pf.conf configuration"
-if has_exact_line "$PF_CONF" "$ANCHOR_LINE"; then
-  pass "Anchor reference present in $PF_CONF"
+if managed_anchor_block_is_exact "$PF_CONF"; then
+  pass "Exact, single managed anchor block is present in $PF_CONF"
 else
-  fail "Exact anchor reference missing from $PF_CONF - run install.sh"
-fi
-
-if has_exact_line "$PF_CONF" "$LOAD_LINE"; then
-  pass "Load directive present in $PF_CONF"
-else
-  fail "Exact load directive missing from $PF_CONF - run install.sh"
+  fail "Managed anchor block is missing, duplicated, or not contiguous in $PF_CONF - run install.sh"
 fi
 
 echo "3. Tailscale interface"
@@ -131,29 +135,47 @@ else
 fi
 
 echo "4. PF runtime state"
-if [[ $EUID -ne 0 ]]; then
+if ! running_as_root; then
   warn "Not running as root - skipping PF runtime checks (re-run with sudo)"
 else
-  anchor_rules="$("$PFCTL_BIN" -a "$TAILSCALE_ANCHOR_NAME" -sr 2>/dev/null || true)"
-  if [[ -n "$anchor_rules" ]]; then
-    pass "Anchor is loaded in PF"
-    if grep -q "$TAILSCALE_IPV4_RANGE" <<<"$anchor_rules"; then
-      pass "IPv4 CGNAT rules present"
+  if pf_is_enabled; then
+    pass "PF is enabled"
+  else
+    fail "PF is not enabled"
+  fi
+
+  if anchors="$(pf_list_anchors)"; then
+    if pf_anchor_is_attached "$TAILSCALE_ANCHOR_NAME" "$anchors"; then
+      pass "Tailscale anchor is attached to the main PF ruleset"
     else
-      fail "IPv4 CGNAT rules missing from the loaded anchor"
+      fail "Tailscale anchor is not attached to the main PF ruleset"
     fi
-    if grep -q "$TAILSCALE_IPV6_RANGE" <<<"$anchor_rules"; then
-      pass "IPv6 ULA rules present"
+    if pf_anchor_is_attached "$MULLVAD_ANCHOR_NAME" "$anchors"; then
+      pass "Mullvad anchor is attached to the main PF ruleset"
+      mullvad_anchor_rules="$(pf_anchor_rules "$MULLVAD_ANCHOR_NAME" 2>/dev/null || true)"
+      if [[ -n "$mullvad_anchor_rules" ]]; then
+        pass "Mullvad anchor contains active firewall rules"
+      else
+        fail "Mullvad anchor is attached but contains no active firewall rules"
+      fi
     else
-      fail "IPv6 ULA rules missing from the loaded anchor"
-    fi
-    if [[ -n "$installed_interface" ]] && grep -q "on $installed_interface " <<<"$anchor_rules"; then
-      pass "Loaded anchor rules target the installed interface"
-    elif [[ -n "$installed_interface" ]]; then
-      fail "Loaded anchor rules do not target the installed interface"
+      fail "Mullvad anchor is not attached; lockdown cannot be established from PF state"
     fi
   else
-    fail "Anchor is not loaded in PF - try: sudo pfctl -f $PF_CONF"
+    fail "Unable to inspect attached PF anchors"
+  fi
+
+  anchor_rules="$(pf_anchor_rules "$TAILSCALE_ANCHOR_NAME" 2>/dev/null || true)"
+  if [[ -n "$installed_interface" ]] && anchor_runtime_rules_are_exact "$anchor_rules" "$installed_interface"; then
+    pass "Runtime Tailscale anchor exactly matches the expected four-rule policy"
+  else
+    fail "Runtime Tailscale anchor is missing, broadened, duplicated, or targets the wrong interface"
+  fi
+
+  if pf_anchor_precedes "$TAILSCALE_ANCHOR_NAME" "$MULLVAD_ANCHOR_NAME"; then
+    pass "Tailscale's quick exception is evaluated before Mullvad's anchor"
+  else
+    fail "Unable to establish that the Tailscale anchor precedes Mullvad's blocking anchor"
   fi
 fi
 
@@ -172,12 +194,60 @@ else
   warn "mullvad-daemon is not running"
 fi
 
+mullvad_status_output="$(mullvad_status 2>/dev/null || true)"
+if [[ -n "$mullvad_status_output" ]] && mullvad_status_is_connected "$mullvad_status_output"; then
+  pass "Mullvad reports an active VPN connection"
+elif [[ -n "$mullvad_status_output" ]]; then
+  fail "Mullvad does not report an active VPN connection"
+else
+  fail "Unable to query Mullvad connection status"
+fi
+
+mullvad_lockdown_output="$(mullvad_lockdown_status 2>/dev/null || true)"
+if [[ -n "$mullvad_lockdown_output" ]] && mullvad_lockdown_is_enabled "$mullvad_lockdown_output"; then
+  pass "Mullvad lockdown mode is enabled"
+elif [[ -n "$mullvad_lockdown_output" ]]; then
+  fail "Mullvad lockdown mode is not enabled"
+else
+  fail "Unable to query Mullvad lockdown mode"
+fi
+
 if [[ -f "$TAILSCALED_DAEMON_PLIST" ]]; then
-  pass "Managed tailscaled LaunchDaemon plist exists"
+  if plist_managed_by_repo "$TAILSCALED_DAEMON_PLIST"; then
+    pass "Repo-managed tailscaled LaunchDaemon plist exists"
+    if plist_uses_program "$TAILSCALED_DAEMON_PLIST" "$TAILSCALED_MANAGED_BIN" && \
+      [[ -x "$TAILSCALED_MANAGED_BIN" ]] && file_is_root_owned_and_not_writable "$TAILSCALED_MANAGED_BIN"; then
+      pass "tailscaled LaunchDaemon uses a protected root-owned binary copy"
+    else
+      fail "tailscaled LaunchDaemon does not use the expected protected binary"
+    fi
+    if plist_discards_standard_streams "$TAILSCALED_DAEMON_PLIST"; then
+      pass "tailscaled LaunchDaemon does not persist stdout/stderr metadata logs"
+    else
+      fail "tailscaled LaunchDaemon persists stdout/stderr; reinstall it to use the secure logging default"
+    fi
+  else
+    warn "$TAILSCALED_DAEMON_PLIST exists but is not marked as managed by this repo"
+  fi
 elif [[ "$tailscaled_running" -eq 1 ]]; then
   pass "No repo-managed tailscaled LaunchDaemon plist found; tailscaled appears to be managed elsewhere"
 else
   warn "Managed tailscaled LaunchDaemon plist not found"
+fi
+
+if [[ -f "$PF_WATCHER_PLIST" ]]; then
+  if plist_managed_by_repo "$PF_WATCHER_PLIST" && pf_watcher_payload_managed_by_repo; then
+    pass "PF watcher plist and payload have repo ownership markers"
+  elif legacy_pf_watcher_plist_managed_by_repo "$PF_WATCHER_PLIST" && legacy_pf_watcher_payload_managed_by_repo; then
+    warn "PF watcher is a recognized legacy install without ownership markers; rerun install-pf-watcher.sh to migrate it"
+  else
+    fail "PF watcher plist or payload is not recognized as repo-managed"
+  fi
+  if plist_discards_standard_streams "$PF_WATCHER_PLIST"; then
+    pass "PF watcher does not persist stdout/stderr metadata logs"
+  else
+    fail "PF watcher persists stdout/stderr; reinstall it to use the secure logging default"
+  fi
 fi
 
 echo "6. Mullvad content-blocker DNS"

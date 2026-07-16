@@ -33,6 +33,22 @@ sudo bash install-tailscaled-daemon.sh
 tailscale up
 ```
 
+The optional daemon installer copies `tailscaled` to a root-owned path before
+launchd executes it, marks the plist as repo-managed, and discards stdout/stderr
+by default rather than accumulating tailnet metadata in world-readable logs. If
+the standard plist already exists without the repo marker, the installer refuses
+to replace it. For a known older install from this repo, inspect the plist and
+then migrate it explicitly:
+
+```bash
+sudo bash install-tailscaled-daemon.sh --replace-existing
+```
+
+That adoption also makes the legacy `/var/log/tailscaled.log` and
+`/var/log/tailscaled.err` files root-only if they exist. They are no longer
+written by the new plist; inspect and remove them later if you do not need the
+old diagnostics.
+
 If you already manage `tailscaled` some other way, keep doing that. The PF fix only needs Tailscale to be running.
 
 Connect Mullvad and enable the settings this repo assumes:
@@ -87,11 +103,11 @@ So "peer reachable, but via DERP" is treated as a working tailnet connection wit
 ## What The Scripts Do
 
 - `install.sh`
-  Detects Tailscale's active `utun` interface, renders the anchor, validates staged PF changes, and applies rollback-safe updates to `pf.conf`.
+  Gets Tailscale's exact self IP from `tailscale ip`, finds the `utun` carrying that address, renders the anchor, validates staged PF changes, and applies a fail-closed PF transaction that preserves and rechecks Mullvad's live anchor.
 - `uninstall.sh`
   Removes the managed anchor block, reloads PF when needed, and deletes the installed anchor file.
 - `install-tailscaled-daemon.sh`
-  Installs a system LaunchDaemon for `tailscaled` using `launchctl bootstrap`.
+  Installs a marked system LaunchDaemon using a protected root-owned copy of `tailscaled` and `launchctl bootstrap`.
 - `uninstall-tailscaled-daemon.sh`
   Removes the repo-managed `tailscaled` LaunchDaemon.
 - `install-pf-watcher.sh`
@@ -105,7 +121,27 @@ So "peer reachable, but via DERP" is treated as a working tailnet connection wit
 - `uninstall-tailnet-resolver.sh`
   Removes the optional resolver override.
 - `verify.sh`
-  Checks exact `pf.conf` lines, interface targeting, PF runtime state, daemon state, optional resolver override state, and optional active connectivity checks.
+  Checks the exact four-rule policy, PF enablement, attached anchor ordering and contents, Mullvad connection/lockdown state, interface identity, daemon ownership, optional resolver state, and optional active connectivity.
+
+## PF Reload Safety
+
+macOS warns that `pfctl -f` can flush rules dynamically attached to the main
+ruleset. Mullvad attaches its `mullvad` anchor that way, so a plain full reload
+can silently remove lockdown enforcement.
+
+When `install.sh` or `uninstall.sh` must change `/etc/pf.conf`, the scripts now:
+
+1. inspect every currently attached top-level anchor and refuse to flush an unknown dynamic attachment;
+2. snapshot Mullvad's active anchor rules;
+3. add a runtime-only `anchor "mullvad"` call after the Tailscale exception in the staged transaction;
+4. apply the validated PF transaction;
+5. verify that Mullvad remains attached with byte-for-byte identical rules; and
+6. restore and recheck both the previous file and runtime ruleset if the load or post-check fails.
+
+The runtime-only Mullvad line is deliberately not written to `/etc/pf.conf`;
+Mullvad remains responsible for its own policy lifecycle. This protects reloads
+performed by this repo. It cannot make unrelated third-party `pfctl -f` commands
+safe.
 
 ## Why Not Just Use The Tailscale Mullvad Add-On?
 
@@ -138,6 +174,9 @@ Useful manual checks:
 ```bash
 sudo pfctl -a tailscale -sr
 sudo pfctl -sr | grep 'anchor "tailscale"'
+sudo pfctl -s info
+sudo pfctl -s Anchors
+mullvad lockdown-mode get
 tailscale ping --tsmp <hostname>
 tailscale ping <hostname>
 dig +short @100.100.100.100 <hostname>.your-tailnet.ts.net
@@ -290,6 +329,12 @@ sudo bash install-pf-watcher.sh
 ```
 
 That installs a LaunchDaemon that runs `refresh-anchor.sh`. It re-checks Tailscale's interface periodically (about every two minutes) and also immediately when macOS rewrites its DNS resolver files. The periodic re-check is what actually guarantees recovery, since a Tailscale restart does not always change a watched file; expect reattachment within roughly the poll interval rather than instantly. When Tailscale has moved to a new `utun`, `refresh-anchor.sh` re-renders the anchor for that interface, validates it, and reloads the runtime anchor. It keeps the narrow interface binding rather than removing it, so it does not widen the PF exception to other interfaces.
+
+The watcher plist and payload carry ownership markers. Install and uninstall
+refuse unrecognized files instead of overwriting or recursively deleting them.
+Known legacy watcher payloads from this repo are migrated on reinstall. Routine
+watcher output goes to `/dev/null`; run `sudo bash refresh-anchor.sh` manually
+when interactive diagnostics are needed.
 
 The watcher does not edit `/etc/pf.conf`; the `anchor` and `load anchor` lines still come from `install.sh`. Remove it with:
 

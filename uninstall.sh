@@ -9,7 +9,8 @@ usage() {
 Usage: sudo bash uninstall.sh
 
 Removes the managed PF anchor block from pf.conf, reloads PF if needed, and
-deletes the installed anchor file after the firewall update succeeds.
+deletes the installed anchor file after the firewall update succeeds. A full
+reload preserves and rechecks Mullvad's active anchor.
 EOF
 }
 
@@ -27,6 +28,10 @@ if [[ $# -gt 0 ]]; then
 fi
 
 require_root
+
+if [[ -f "$ANCHOR_FILE" ]]; then
+  anchor_file_managed_by_repo "$ANCHOR_FILE" || die "$ANCHOR_FILE exists but is not a recognized repo-managed anchor. Refusing to remove or detach it."
+fi
 
 tmp_pf_conf="$(make_temp_file pf-conf)"
 trap 'rm -f "$tmp_pf_conf"' EXIT

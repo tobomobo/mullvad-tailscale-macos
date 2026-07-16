@@ -1,3 +1,4 @@
+# Managed by mullvad-tailscale-macos
 # Template rendered by install.sh.
 # If you are installing manually, replace __TAILSCALE_INTERFACE__ with the
 # active utun interface that Tailscale is currently using.
