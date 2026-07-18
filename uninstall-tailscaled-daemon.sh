@@ -27,6 +27,14 @@ fi
 
 require_root
 
+if [[ -f "$TAILSCALED_DAEMON_PLIST" ]] && ! plist_managed_by_repo "$TAILSCALED_DAEMON_PLIST"; then
+  die "$TAILSCALED_DAEMON_PLIST is not marked as managed by this repo. Refusing to stop or remove it."
+fi
+
+if [[ ! -f "$TAILSCALED_DAEMON_PLIST" && -e "$TAILSCALED_MANAGED_BIN" ]]; then
+  die "$TAILSCALED_MANAGED_BIN exists without a repo-managed plist. Refusing to remove it automatically."
+fi
+
 echo "Stopping $TAILSCALED_DAEMON_LABEL if it is loaded ..."
 bootout_launchdaemon || true
 
@@ -35,6 +43,11 @@ if [[ -f "$TAILSCALED_DAEMON_PLIST" ]]; then
   "$RM_BIN" "$TAILSCALED_DAEMON_PLIST"
 else
   echo "LaunchDaemon plist not found, skipping."
+fi
+
+if [[ -f "$TAILSCALED_MANAGED_BIN" ]]; then
+  echo "Removing $TAILSCALED_MANAGED_BIN ..."
+  "$RM_BIN" "$TAILSCALED_MANAGED_BIN"
 fi
 
 echo ""

@@ -59,12 +59,55 @@ setup_fake_commands() {
 printf '%s\n' "$*" >> "$TEST_LOG_DIR/pfctl.calls"
 
 if [[ "${1:-}" == "-a" && "${2:-}" == "tailscale" && "${3:-}" == "-sr" ]]; then
-  printf '%s\n' "${PFCTL_ANCHOR_RULES:-}"
+  if [[ -n "${PFCTL_ANCHOR_RULES+x}" ]] && ! grep -Eq '^-a tailscale -f ' "$TEST_LOG_DIR/pfctl.calls"; then
+    printf '%s\n' "$PFCTL_ANCHOR_RULES"
+  elif [[ -f "$ANCHOR_FILE" ]]; then
+    awk 'NF && $1 != "#" { print }' "$ANCHOR_FILE"
+  fi
   exit 0
 fi
 
-if [[ "${PFCTL_FAIL_RELOAD:-0}" == "1" && "${1:-}" == "-f" && "${2:-}" == "$PF_CONF" ]]; then
-  exit 1
+if [[ "${1:-}" == "-a" && "${2:-}" == "mullvad" && "${3:-}" == "-sr" ]]; then
+  reload_count="$(grep -Ec '^-f ' "$TEST_LOG_DIR/pfctl.calls" || true)"
+  if { [[ "${PFCTL_DROP_MULLVAD_AFTER_RELOAD:-0}" == "1" && "$reload_count" -ge 1 ]]; } || \
+    { [[ "${PFCTL_DROP_MULLVAD_ON_FIRST_RELOAD:-0}" == "1" && "$reload_count" == "1" ]]; }; then
+    exit 0
+  fi
+  printf '%s\n' "${PFCTL_MULLVAD_RULES-block drop all}"
+  exit 0
+fi
+
+if [[ "${1:-}" == "-s" && "${2:-}" == "Anchors" ]]; then
+  if [[ "${PFCTL_FAIL_INSPECTION:-0}" == "1" ]]; then
+    exit 1
+  fi
+  reload_count="$(grep -Ec '^-f ' "$TEST_LOG_DIR/pfctl.calls" || true)"
+  if { [[ "${PFCTL_DROP_MULLVAD_AFTER_RELOAD:-0}" == "1" && "$reload_count" -ge 1 ]]; } || \
+    { [[ "${PFCTL_DROP_MULLVAD_ON_FIRST_RELOAD:-0}" == "1" && "$reload_count" == "1" ]]; }; then
+    printf '%s\n' "tailscale"
+  elif [[ -n "${PFCTL_ANCHORS+x}" ]]; then
+    printf '%b\n' "$PFCTL_ANCHORS"
+  else
+    printf '%b\n' "tailscale\nmullvad"
+  fi
+  exit 0
+fi
+
+if [[ "${1:-}" == "-s" && "${2:-}" == "info" ]]; then
+  printf '%s\n' "${PFCTL_INFO:-Status: Enabled for 0 days}"
+  exit 0
+fi
+
+if [[ "${1:-}" == "-sr" ]]; then
+  printf '%b\n' "${PFCTL_MAIN_RULES:-anchor \"tailscale\" all\nanchor \"mullvad\" all}"
+  exit 0
+fi
+
+if [[ "${1:-}" == "-f" ]]; then
+  cp "$2" "$TEST_LOG_DIR/last-reloaded.conf"
+  if [[ "${PFCTL_FAIL_RELOAD:-0}" == "1" ]]; then
+    exit 1
+  fi
 fi
 
 if [[ "${PFCTL_FAIL_ANCHOR_LOAD:-0}" == "1" && "${1:-}" == "-a" && "${3:-}" == "-f" ]]; then
@@ -103,6 +146,12 @@ EOF
 
   cat > "$bin_dir/plutil" <<'EOF'
 #!/bin/bash
+exit 0
+EOF
+
+  cat > "$bin_dir/stat" <<'EOF'
+#!/bin/bash
+printf '%s\n' "0 755"
 exit 0
 EOF
 
@@ -165,6 +214,16 @@ EOF
 
   cat > "$bin_dir/tailscale" <<'EOF'
 #!/bin/bash
+if [[ "${1:-}" == "ip" && "${2:-}" == "-4" ]]; then
+  printf '%s\n' "${TAILSCALE_IPV4:-100.82.1.2}"
+  exit "${TAILSCALE_IP_EXIT:-0}"
+fi
+
+if [[ "${1:-}" == "ip" && "${2:-}" == "-6" ]]; then
+  printf '%s\n' "${TAILSCALE_IPV6:-fd7a:115c:a1e0::5252:102}"
+  exit "${TAILSCALE_IP_EXIT:-0}"
+fi
+
 if [[ "${1:-}" == "ping" ]]; then
   if [[ " $* " == *" --tsmp "* ]]; then
     printf '%s\n' "${TAILSCALE_TSMP_OUTPUT:-}"
@@ -176,6 +235,19 @@ if [[ "${1:-}" == "ping" ]]; then
 fi
 
 exit 0
+EOF
+
+  cat > "$bin_dir/mullvad" <<'EOF'
+#!/bin/bash
+if [[ "${1:-}" == "status" ]]; then
+  printf '%s\n' "${MULLVAD_STATUS:-Connected to test relay}"
+  exit "${MULLVAD_EXIT:-0}"
+fi
+if [[ "${1:-}" == "lockdown-mode" && "${2:-}" == "get" ]]; then
+  printf '%s\n' "${MULLVAD_LOCKDOWN:-Block traffic when VPN is disconnected: on}"
+  exit "${MULLVAD_EXIT:-0}"
+fi
+exit 1
 EOF
 
   chmod +x "$bin_dir"/*
@@ -193,6 +265,8 @@ run_install_env() {
   ANCHOR_FILE="$workspace/pf.anchors/tailscale" \
   PFCTL_BIN="$bin_dir/pfctl" \
   IFCONFIG_BIN="$bin_dir/ifconfig" \
+  TAILSCALE_BIN="$bin_dir/tailscale" \
+  MULLVAD_BIN="$bin_dir/mullvad" \
   CHOWN_BIN="$bin_dir/chown" \
   CHMOD_BIN="$bin_dir/chmod" \
   bash "$ROOT_DIR/install.sh" "$@"
@@ -208,6 +282,7 @@ run_uninstall_env() {
   PF_CONF="$workspace/pf.conf" \
   ANCHOR_FILE="$workspace/pf.anchors/tailscale" \
   PFCTL_BIN="$bin_dir/pfctl" \
+  MULLVAD_BIN="$bin_dir/mullvad" \
   bash "$ROOT_DIR/uninstall.sh" "$@"
 }
 
@@ -224,6 +299,7 @@ run_verify_env() {
   RESOLVER_DIR="$workspace/resolver" \
   PFCTL_BIN="$bin_dir/pfctl" \
   IFCONFIG_BIN="$bin_dir/ifconfig" \
+  MULLVAD_BIN="$bin_dir/mullvad" \
   PGREP_BIN="$bin_dir/pgrep" \
   CURL_BIN="$bin_dir/curl" \
   DIG_BIN="$bin_dir/dig" \
@@ -232,7 +308,11 @@ run_verify_env() {
   KILLALL_BIN="$bin_dir/killall" \
   HOSTS_FILE="$workspace/hosts" \
   TAILSCALE_BIN="$bin_dir/tailscale" \
+  STAT_BIN="$bin_dir/stat" \
   TAILSCALED_DAEMON_PLIST="$workspace/com.tailscale.tailscaled.plist" \
+  TAILSCALED_MANAGED_BIN="$workspace/managed-tailscaled" \
+  PF_WATCHER_INSTALL_DIR="$workspace/watcher" \
+  PF_WATCHER_PLIST="$workspace/com.mullvad-tailscale-macos.pf-watcher.plist" \
   bash "$ROOT_DIR/verify.sh" "$@"
 }
 
@@ -243,7 +323,8 @@ run_daemon_install_env() {
   local bin_dir="$workspace/bin"
   TEST_LOG_DIR="$workspace/logs" \
   SKIP_ROOT_CHECK=1 \
-  TAILSCALED_BIN="/opt/test/bin/tailscaled" \
+  TAILSCALED_BIN="$workspace/source-tailscaled" \
+  TAILSCALED_MANAGED_BIN="$workspace/managed-tailscaled" \
   TAILSCALED_DAEMON_PLIST="$workspace/com.tailscale.tailscaled.plist" \
   PLUTIL_BIN="$bin_dir/plutil" \
   LAUNCHCTL_BIN="$bin_dir/launchctl" \
@@ -260,6 +341,7 @@ run_daemon_uninstall_env() {
   TEST_LOG_DIR="$workspace/logs" \
   SKIP_ROOT_CHECK=1 \
   TAILSCALED_DAEMON_PLIST="$workspace/com.tailscale.tailscaled.plist" \
+  TAILSCALED_MANAGED_BIN="$workspace/managed-tailscaled" \
   LAUNCHCTL_BIN="$bin_dir/launchctl" \
   bash "$ROOT_DIR/uninstall-tailscaled-daemon.sh" "$@"
 }
@@ -303,7 +385,7 @@ run_pf_watcher_install_env() {
   SKIP_ROOT_CHECK=1 \
   PF_WATCHER_INSTALL_DIR="$workspace/watcher" \
   PF_WATCHER_PLIST="$workspace/com.mullvad-tailscale-macos.pf-watcher.plist" \
-  PF_WATCHER_LOG="$workspace/pf-watcher.log" \
+  PF_WATCHER_LOG="/dev/null" \
   PLUTIL_BIN="$bin_dir/plutil" \
   LAUNCHCTL_BIN="$bin_dir/launchctl" \
   CHOWN_BIN="$bin_dir/chown" \
@@ -337,6 +419,8 @@ run_refresh_env() {
   ANCHOR_FILE="$workspace/pf.anchors/tailscale" \
   PFCTL_BIN="$bin_dir/pfctl" \
   IFCONFIG_BIN="$bin_dir/ifconfig" \
+  TAILSCALE_BIN="$bin_dir/tailscale" \
+  MULLVAD_BIN="$bin_dir/mullvad" \
   CHOWN_BIN="$bin_dir/chown" \
   CHMOD_BIN="$bin_dir/chmod" \
   CP_BIN="cp" \
@@ -353,6 +437,8 @@ new_workspace() {
   : > "$workspace/logs/dscacheutil.calls"
   : > "$workspace/logs/killall.calls"
   : > "$workspace/hosts"
+  printf '#!/bin/bash\nexit 0\n' > "$workspace/source-tailscaled"
+  chmod +x "$workspace/source-tailscaled"
   mkdir -p "$workspace/resolver"
   setup_fake_commands "$workspace/bin"
   echo "$workspace"
@@ -424,6 +510,9 @@ EOF
 
   cat > "$workspace/pf.anchors/tailscale" <<'EOF'
 pass out quick on utun5 inet from any to 100.64.0.0/10 no state
+pass in quick on utun5 inet from 100.64.0.0/10 to any no state
+pass out quick on utun5 inet6 from any to fd7a:115c:a1e0::/48 no state
+pass in quick on utun5 inet6 from fd7a:115c:a1e0::/48 to any no state
 EOF
 
   run_uninstall_env "$workspace"
@@ -945,23 +1034,28 @@ test_daemon_installer_bootstraps_launchdaemon() {
 
   run_daemon_install_env "$workspace"
 
-  assert_file_contains "$workspace/com.tailscale.tailscaled.plist" "/opt/test/bin/tailscaled"
+  assert_file_contains "$workspace/com.tailscale.tailscaled.plist" "<!-- Managed by mullvad-tailscale-macos -->"
+  assert_file_contains "$workspace/com.tailscale.tailscaled.plist" "$workspace/managed-tailscaled"
+  assert_count "$workspace/com.tailscale.tailscaled.plist" "    <string>/dev/null</string>" 2
+  [[ -x "$workspace/managed-tailscaled" ]] || fail "Expected a protected managed tailscaled copy"
+  assert_file_contains "$workspace/logs/chmod.calls" "755 $workspace/managed-tailscaled"
   assert_file_contains "$workspace/logs/launchctl.calls" "bootstrap system $workspace/com.tailscale.tailscaled.plist"
   assert_file_contains "$workspace/logs/launchctl.calls" "kickstart -k system/com.tailscale.tailscaled"
-  pass "daemon installer writes a plist and bootstraps it with launchctl"
+  pass "daemon installer copies a protected binary, suppresses persistent logs, marks the plist, and bootstraps it"
 }
 
 test_daemon_uninstaller_boots_out_and_removes_plist() {
   local workspace
   workspace="$(new_workspace daemon-uninstall)"
 
-  touch "$workspace/com.tailscale.tailscaled.plist"
+  run_daemon_install_env "$workspace" >/dev/null
   LAUNCHCTL_PRINT_EXIT=0 run_daemon_uninstall_env "$workspace"
 
   assert_file_contains "$workspace/logs/launchctl.calls" "print system/com.tailscale.tailscaled"
   assert_file_contains "$workspace/logs/launchctl.calls" "bootout system/com.tailscale.tailscaled"
   [[ ! -f "$workspace/com.tailscale.tailscaled.plist" ]] || fail "Expected LaunchDaemon plist to be removed"
-  pass "daemon uninstaller unloads and removes the plist"
+  [[ ! -f "$workspace/managed-tailscaled" ]] || fail "Expected managed tailscaled binary to be removed"
+  pass "daemon uninstaller unloads and removes only marked daemon artifacts"
 }
 
 test_pf_watcher_installer_installs_payload_and_bootstraps() {
@@ -973,7 +1067,10 @@ test_pf_watcher_installer_installs_payload_and_bootstraps() {
   assert_file_contains "$workspace/watcher/refresh-anchor.sh" "Reattached the PF anchor"
   [[ -f "$workspace/watcher/lib/common.sh" ]] || fail "Expected lib/common.sh in the watcher payload"
   assert_file_contains "$workspace/watcher/etc/pf.anchors/tailscale" "__TAILSCALE_INTERFACE__"
+  assert_file_contains "$workspace/watcher/.managed-by-mullvad-tailscale-macos" "Managed by mullvad-tailscale-macos pf-watcher"
   assert_file_contains "$workspace/com.mullvad-tailscale-macos.pf-watcher.plist" "com.mullvad-tailscale-macos.pf-watcher"
+  assert_file_contains "$workspace/com.mullvad-tailscale-macos.pf-watcher.plist" "<!-- Managed by mullvad-tailscale-macos -->"
+  assert_count "$workspace/com.mullvad-tailscale-macos.pf-watcher.plist" "    <string>/dev/null</string>" 2
   assert_file_contains "$workspace/com.mullvad-tailscale-macos.pf-watcher.plist" "$workspace/watcher/refresh-anchor.sh"
   assert_file_contains "$workspace/com.mullvad-tailscale-macos.pf-watcher.plist" "/var/run/resolv.conf"
   grep -Fxq "755 $workspace/watcher" "$workspace/logs/chmod.calls" || fail "Expected the payload dir itself to be chmod 755 (root runs scripts from it on a timer)"
@@ -986,9 +1083,7 @@ test_pf_watcher_uninstaller_boots_out_and_removes() {
   local workspace
   workspace="$(new_workspace pf-watcher-uninstall)"
 
-  mkdir -p "$workspace/watcher/lib"
-  : > "$workspace/watcher/refresh-anchor.sh"
-  touch "$workspace/com.mullvad-tailscale-macos.pf-watcher.plist"
+  run_pf_watcher_install_env "$workspace" >/dev/null
 
   LAUNCHCTL_PRINT_EXIT=0 run_pf_watcher_uninstall_env "$workspace"
 
@@ -1042,7 +1137,10 @@ EOF
 
   output="$(
     IFCONFIG_LIST="lo0 utun7" \
-    PFCTL_ANCHOR_RULES="pass out quick on utun7 inet from any to 100.64.0.0/10 no state" \
+    PFCTL_ANCHOR_RULES="pass out quick on utun7 inet from any to 100.64.0.0/10 no state
+pass in quick on utun7 inet from 100.64.0.0/10 to any no state
+pass out quick on utun7 inet6 from any to fd7a:115c:a1e0::/48 no state
+pass in quick on utun7 inet6 from fd7a:115c:a1e0::/48 to any no state" \
     run_refresh_env "$workspace"
   )"
 
@@ -1086,6 +1184,9 @@ test_refresh_fails_when_runtime_reload_fails() {
 
   cat > "$workspace/pf.anchors/tailscale" <<'EOF'
 pass out quick on utun5 inet from any to 100.64.0.0/10 no state
+pass in quick on utun5 inet from 100.64.0.0/10 to any no state
+pass out quick on utun5 inet6 from any to fd7a:115c:a1e0::/48 no state
+pass in quick on utun5 inet6 from fd7a:115c:a1e0::/48 to any no state
 EOF
 
   cat > "$workspace/ifconfig/utun9" <<'EOF'
@@ -1100,11 +1201,235 @@ EOF
   pass "refresh fails loudly when reloading the runtime anchor fails"
 }
 
+test_install_preserves_live_mullvad_anchor_during_reload() {
+  local workspace
+  workspace="$(new_workspace install-preserve-mullvad)"
+
+  cat > "$workspace/pf.conf" <<'EOF'
+set skip on lo0
+EOF
+  cat > "$workspace/ifconfig/utun7" <<'EOF'
+utun7: flags=8051<UP,POINTOPOINT,RUNNING,MULTICAST> mtu 1280
+	inet 100.82.1.2 --> 100.82.1.2 netmask 0xffffffff
+EOF
+
+  IFCONFIG_LIST="lo0 utun7" run_install_env "$workspace" >/dev/null
+
+  assert_file_contains "$workspace/logs/last-reloaded.conf" 'anchor "tailscale"'
+  assert_file_contains "$workspace/logs/last-reloaded.conf" 'anchor "mullvad"'
+  assert_file_not_contains "$workspace/pf.conf" 'anchor "mullvad"'
+  pass "full PF reload preserves Mullvad through a runtime-only anchor attachment"
+}
+
+test_install_rolls_back_if_mullvad_changes_after_reload() {
+  local workspace
+  local reload_count
+  workspace="$(new_workspace install-mullvad-postcheck)"
+
+  cat > "$workspace/pf.conf" <<'EOF'
+set skip on lo0
+EOF
+
+  PFCTL_DROP_MULLVAD_ON_FIRST_RELOAD=1 run_install_env "$workspace" --interface utun7 >/dev/null 2>&1 && \
+    fail "install should fail when Mullvad disappears during the PF transaction"
+
+  assert_file_contains "$workspace/pf.conf" "set skip on lo0"
+  assert_file_not_contains "$workspace/pf.conf" 'anchor "tailscale"'
+  [[ ! -f "$workspace/pf.anchors/tailscale" ]] || fail "Expected failed install to remove its newly created anchor"
+  reload_count="$(grep -Ec '^-f ' "$workspace/logs/pfctl.calls" || true)"
+  [[ "$reload_count" == "2" ]] || fail "Expected one attempted update and one rollback reload, got $reload_count"
+  assert_file_contains "$workspace/logs/last-reloaded.conf" 'anchor "mullvad"'
+  pass "install restores disk and runtime PF state when the Mullvad post-check fails"
+}
+
+test_install_refuses_when_mullvad_expected_without_anchor() {
+  local workspace
+  workspace="$(new_workspace install-mullvad-missing)"
+
+  cat > "$workspace/pf.conf" <<'EOF'
+set skip on lo0
+EOF
+
+  PFCTL_ANCHORS="" run_install_env "$workspace" --interface utun7 >/dev/null 2>&1 && \
+    fail "install should refuse a reload when Mullvad reports protection but has no PF anchor"
+
+  assert_file_not_contains "$workspace/pf.conf" 'anchor "tailscale"'
+  [[ ! -f "$workspace/pf.anchors/tailscale" ]] || fail "Expected refused install to restore the anchor path"
+  pass "install refuses to reload an already inconsistent Mullvad protection state"
+}
+
+test_uninstall_refuses_when_expected_mullvad_anchor_is_empty() {
+  local workspace
+  workspace="$(new_workspace uninstall-mullvad-empty)"
+
+  cat > "$workspace/pf.conf" <<EOF
+set skip on lo0
+$ANCHOR_COMMENT
+anchor "tailscale"
+load anchor "tailscale" from "$workspace/pf.anchors/tailscale"
+EOF
+
+  cat > "$workspace/pf.anchors/tailscale" <<'EOF'
+pass out quick on utun7 inet from any to 100.64.0.0/10 no state
+pass in quick on utun7 inet from 100.64.0.0/10 to any no state
+pass out quick on utun7 inet6 from any to fd7a:115c:a1e0::/48 no state
+pass in quick on utun7 inet6 from fd7a:115c:a1e0::/48 to any no state
+EOF
+
+  PFCTL_MULLVAD_RULES="" run_uninstall_env "$workspace" >/dev/null 2>&1 && \
+    fail "uninstall should refuse a full reload when active Mullvad protection has an empty anchor"
+
+  assert_file_contains "$workspace/pf.conf" 'anchor "tailscale"'
+  [[ -f "$workspace/pf.anchors/tailscale" ]] || fail "Expected refused uninstall to preserve the anchor file"
+  pass "shared PF updates refuse an empty Mullvad anchor while protection is expected"
+}
+
+test_install_refuses_unknown_dynamic_anchor() {
+  local workspace
+  workspace="$(new_workspace install-unknown-anchor)"
+
+  cat > "$workspace/pf.conf" <<'EOF'
+set skip on lo0
+EOF
+
+  PFCTL_ANCHORS="tailscale
+mullvad
+other-vpn" run_install_env "$workspace" --interface utun7 >/dev/null 2>&1 && \
+    fail "install should refuse to flush an unknown dynamic anchor"
+
+  assert_file_not_contains "$workspace/pf.conf" 'anchor "tailscale"'
+  pass "install refuses to flush unknown dynamic PF attachments"
+}
+
+test_interface_detection_uses_exact_tailscale_identity() {
+  local workspace
+  workspace="$(new_workspace interface-identity)"
+
+  cat > "$workspace/pf.conf" <<'EOF'
+set skip on lo0
+EOF
+  cat > "$workspace/ifconfig/utun4" <<'EOF'
+utun4: flags=8051<UP,POINTOPOINT,RUNNING,MULTICAST> mtu 1280
+	inet 100.1.2.3 --> 100.1.2.3 netmask 0xffffffff
+EOF
+  cat > "$workspace/ifconfig/utun7" <<'EOF'
+utun7: flags=8051<UP,POINTOPOINT,RUNNING,MULTICAST> mtu 1280
+	inet 100.82.1.2 --> 100.82.1.2 netmask 0xffffffff
+EOF
+
+  IFCONFIG_LIST="lo0 utun4 utun7" run_install_env "$workspace" >/dev/null
+  assert_file_contains "$workspace/pf.anchors/tailscale" " on utun7 "
+  assert_file_not_contains "$workspace/pf.anchors/tailscale" " on utun4 "
+  pass "interface detection ignores unrelated 100.x tunnels and matches tailscale ip exactly"
+}
+
+test_install_refuses_unmanaged_anchor_file() {
+  local workspace
+  workspace="$(new_workspace install-unmanaged-anchor)"
+
+  cat > "$workspace/pf.conf" <<'EOF'
+set skip on lo0
+EOF
+  cat > "$workspace/pf.anchors/tailscale" <<'EOF'
+pass quick all
+EOF
+
+  run_install_env "$workspace" --interface utun7 >/dev/null 2>&1 && fail "install should refuse an unmanaged anchor file"
+  assert_file_contains "$workspace/pf.anchors/tailscale" "pass quick all"
+  pass "install refuses to overwrite an unmanaged anchor artifact"
+}
+
+test_verify_rejects_broadened_runtime_anchor() {
+  local workspace
+  workspace="$(new_workspace verify-broad-runtime)"
+
+  cat > "$workspace/pf.conf" <<EOF
+anchor "tailscale"
+load anchor "tailscale" from "$workspace/pf.anchors/tailscale"
+EOF
+  cat > "$workspace/pf.anchors/tailscale" <<'EOF'
+pass out quick on utun7 inet from any to 100.64.0.0/10 no state
+pass in quick on utun7 inet from 100.64.0.0/10 to any no state
+pass out quick on utun7 inet6 from any to fd7a:115c:a1e0::/48 no state
+pass in quick on utun7 inet6 from fd7a:115c:a1e0::/48 to any no state
+EOF
+  cat > "$workspace/ifconfig/utun7" <<'EOF'
+utun7: flags=8051<UP,POINTOPOINT,RUNNING,MULTICAST> mtu 1280
+	inet 100.82.1.2 --> 100.82.1.2 netmask 0xffffffff
+EOF
+
+  IFCONFIG_LIST="lo0 utun7" \
+  PFCTL_ANCHOR_RULES="pass out quick on utun7 inet from any to 100.64.0.0/10 no state
+pass in quick on utun7 inet from 100.64.0.0/10 to any no state
+pass out quick on utun7 inet6 from any to fd7a:115c:a1e0::/48 no state
+pass in quick on utun7 inet6 from fd7a:115c:a1e0::/48 to any no state
+pass quick all" \
+  run_verify_env "$workspace" >/dev/null 2>&1 && fail "verify should reject extra broad runtime rules"
+
+  pass "verify rejects a broadened runtime anchor even when all expected rules are present"
+}
+
+test_daemon_scripts_refuse_unmarked_plist() {
+  local workspace
+  workspace="$(new_workspace daemon-unmarked)"
+
+  printf '%s\n' '<plist><dict><string>foreign daemon</string></dict></plist>' > "$workspace/com.tailscale.tailscaled.plist"
+
+  run_daemon_install_env "$workspace" >/dev/null 2>&1 && fail "daemon installer should refuse an unmarked plist"
+  run_daemon_uninstall_env "$workspace" >/dev/null 2>&1 && fail "daemon uninstaller should refuse an unmarked plist"
+  assert_file_contains "$workspace/com.tailscale.tailscaled.plist" "foreign daemon"
+  [[ ! -s "$workspace/logs/launchctl.calls" ]] || fail "Unmarked daemon must not be stopped or bootstrapped"
+  pass "daemon scripts refuse to modify unmarked launchd artifacts"
+}
+
+test_watcher_scripts_refuse_unrecognized_artifacts() {
+  local workspace
+  workspace="$(new_workspace watcher-unmarked)"
+
+  mkdir -p "$workspace/watcher"
+  printf '%s\n' "foreign payload" > "$workspace/watcher/foreign"
+  printf '%s\n' '<plist><dict><string>foreign watcher</string></dict></plist>' > "$workspace/com.mullvad-tailscale-macos.pf-watcher.plist"
+
+  run_pf_watcher_install_env "$workspace" >/dev/null 2>&1 && fail "watcher installer should refuse unrecognized artifacts"
+  run_pf_watcher_uninstall_env "$workspace" >/dev/null 2>&1 && fail "watcher uninstaller should refuse unrecognized artifacts"
+  assert_file_contains "$workspace/watcher/foreign" "foreign payload"
+  pass "watcher scripts refuse to overwrite or delete unrecognized artifacts"
+}
+
+test_refresh_refuses_when_mullvad_protection_is_missing() {
+  local workspace
+  workspace="$(new_workspace refresh-mullvad-missing)"
+
+  cat > "$workspace/pf.anchors/tailscale" <<'EOF'
+pass out quick on utun7 inet from any to 100.64.0.0/10 no state
+pass in quick on utun7 inet from 100.64.0.0/10 to any no state
+pass out quick on utun7 inet6 from any to fd7a:115c:a1e0::/48 no state
+pass in quick on utun7 inet6 from fd7a:115c:a1e0::/48 to any no state
+EOF
+  cat > "$workspace/ifconfig/utun7" <<'EOF'
+utun7: flags=8051<UP,POINTOPOINT,RUNNING,MULTICAST> mtu 1280
+	inet 100.82.1.2 --> 100.82.1.2 netmask 0xffffffff
+EOF
+
+  IFCONFIG_LIST="lo0 utun7" PFCTL_ANCHORS="tailscale" run_refresh_env "$workspace" >/dev/null 2>&1 && \
+    fail "refresh should refuse to attach Tailscale while expected Mullvad protection is absent"
+  assert_file_not_contains "$workspace/logs/pfctl.calls" "-a tailscale -f $workspace/pf.anchors/tailscale"
+  pass "refresh refuses to attach the exception when Mullvad protection is inconsistent"
+}
+
 test_install_detects_interface_and_writes_anchor
 test_install_repairs_partial_anchor_block
 test_install_rolls_back_failed_pf_reload
+test_install_preserves_live_mullvad_anchor_during_reload
+test_install_rolls_back_if_mullvad_changes_after_reload
+test_install_refuses_when_mullvad_expected_without_anchor
+test_uninstall_refuses_when_expected_mullvad_anchor_is_empty
+test_install_refuses_unknown_dynamic_anchor
+test_interface_detection_uses_exact_tailscale_identity
+test_install_refuses_unmanaged_anchor_file
 test_uninstall_removes_anchor_block_and_file
 test_verify_rejects_partial_pf_conf
+test_verify_rejects_broadened_runtime_anchor
 test_verify_supports_active_checks
 test_verify_accepts_derp_fallback_as_reachable
 test_verify_rejects_system_resolver_mismatch
@@ -1123,12 +1448,15 @@ test_resolver_uninstaller_removes_file_and_flushes_dns
 test_resolver_uninstaller_refuses_unmanaged_existing_file
 test_daemon_installer_bootstraps_launchdaemon
 test_daemon_uninstaller_boots_out_and_removes_plist
+test_daemon_scripts_refuse_unmarked_plist
 test_pf_watcher_installer_installs_payload_and_bootstraps
 test_pf_watcher_uninstaller_boots_out_and_removes
+test_watcher_scripts_refuse_unrecognized_artifacts
 test_refresh_reattaches_anchor_on_interface_change
 test_refresh_noop_when_interface_unchanged
 test_refresh_reattaches_when_runtime_anchor_empty
 test_refresh_fails_when_runtime_reload_fails
+test_refresh_refuses_when_mullvad_protection_is_missing
 
 echo ""
 echo "All tests passed ($PASS_COUNT checks)."

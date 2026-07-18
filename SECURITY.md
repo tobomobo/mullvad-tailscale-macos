@@ -2,6 +2,14 @@
 
 This document describes the security model and tradeoffs of this workaround. It is not a claim that the repo has undergone a formal security audit.
 
+## Trust Model
+
+This repo assumes a standalone Mullvad app, a standalone Tailscale client, and
+a trusted local root administrator. It protects against accidental broad PF
+exceptions, stale or ambiguous tunnel selection, unsafe ruleset reloads, and
+unprivileged modification of repo-managed launchd payloads. It does not try to
+defend the machine from another process or administrator that already has root.
+
 ## What This Repo Changes
 
 This repo always installs a PF anchor and adds the following two managed lines to `/etc/pf.conf`:
@@ -29,17 +37,38 @@ That is intentionally narrow:
 
 In the DNS edge case documented in this repo, it can also optionally install a domain-scoped `/etc/resolver/<tailnet>.ts.net` override that points macOS apps at Tailscale MagicDNS for that one tailnet domain.
 
+## Full PF Transactions Preserve Mullvad
+
+`pfctl -f` replaces the main PF ruleset. Mullvad's current macOS implementation
+attaches its `mullvad` anchor dynamically, so reloading only the persistent
+`/etc/pf.conf` content would detach that call even though the Mullvad sub-anchor
+rules still exist.
+
+For a full reload initiated by this repo, the shared update path snapshots the
+attached anchors and Mullvad's rules, refuses unknown dynamic attachments, adds
+a runtime-only Mullvad anchor call after the Tailscale exception, and verifies
+that Mullvad's rules are unchanged afterward. A failed load or post-check uses
+the same Mullvad-preserving path to restore and recheck the previous file and
+runtime ruleset.
+
+This protection applies only to reloads performed through these scripts. A
+different administrator or application can still invoke `pfctl -f` directly.
+
 ## Why Split Tunneling Does Not Solve This
 
-Mullvad's split tunneling on macOS works through Network Extension content-filter behavior. `tailscaled` runs as a root-managed system daemon, and root processes are the important edge case here.
-
-This repo therefore fixes the problem at the PF layer instead of assuming app-level split tunneling will exempt `tailscaled`.
+Mullvad [documents macOS split tunneling](https://mullvad.net/en/blog/split-tunneling-on-macos) as selecting applications and tracking
+their processes. This repo does not assume that an app-level exclusion is a
+stable contract for a privileged, independently managed `tailscaled` service.
+The target failure is observable at PF, so the workaround is kept at that layer.
 
 ## Why This Should Not Create A DNS Leak
 
 The anchor only allows traffic to Tailscale's own address ranges on Tailscale's interface. It does not open arbitrary destinations, and it does not change Mullvad DNS settings.
 
-Magic DNS queries to `100.100.100.100` are expected to stay on Tailscale's tunnel path, which is why this approach should be leak-safe in normal operation.
+Tailscale [documents `100.100.100.100` (Quad100)](https://tailscale.com/docs/reference/reserved-ip-addresses) as a device-local service:
+queries stay on the local Mac and do not traverse the tailnet. macOS routes that
+service through Tailscale's virtual interface, so the interface-scoped exception
+can reach it without opening arbitrary DNS destinations.
 
 That said, "should be leak-safe" is the right level of confidence here. You should still verify your own machine after installation:
 
@@ -47,6 +76,12 @@ That said, "should be leak-safe" is the right level of confidence here. You shou
 sudo bash verify.sh --tailnet-target <peer> --magicdns-name <peer>.your-tailnet.ts.net
 curl https://am.i.mullvad.net/connected
 ```
+
+The verifier now fails if PF is disabled, either core anchor is detached, the
+Tailscale runtime policy contains anything beyond the four expected rules,
+Mullvad is ordered before the exception, or Mullvad connection/lockdown state is
+missing. Those checks establish the inspected state at that moment; they are not
+a proof against every future macOS, Mullvad, routing, or DNS change.
 
 ## Direct MagicDNS Is Not The Same As macOS Hostname Resolution
 
@@ -154,6 +189,27 @@ A natural temptation when Tailscale's `utun` number changes is to drop the inter
 
 Instead, the optional `install-pf-watcher.sh` LaunchDaemon reattaches the anchor to Tailscale's current interface, using the same render, validate, and reload path as `install.sh`. It re-checks periodically (about every two minutes, which is what guarantees recovery) and also when the DNS resolver configuration changes, so reattachment happens within roughly the poll interval rather than instantly. That keeps the exception scoped to the active Tailscale tunnel while staying robust to interface renumbering. It reloads only the runtime anchor and does not modify `/etc/pf.conf`.
 
+Interface discovery does not accept the first `utun` with an arbitrary `100.x`
+address. It asks `tailscale ip` for this node's exact IPv4/IPv6 identity and then
+finds the interface carrying that address. An explicit override is restricted to
+the `utun<integer>` form.
+
+## LaunchDaemon And Artifact Boundaries
+
+The optional tailscaled LaunchDaemon never executes the user- or Homebrew-owned
+binary directly. Installation copies it to
+`/Library/PrivilegedHelperTools/mullvad-tailscale-macos.tailscaled`, makes that
+copy root-owned and non-writable by group/other users, and points the marked
+plist at the copy. Existing unmarked plists require an explicit
+`--replace-existing` adoption step.
+
+Repo-managed anchors, plists, resolver files, and watcher payloads carry markers,
+or must match the exact narrow legacy anchor policy. Installers and uninstallers
+refuse unrecognized collisions. LaunchDaemon stdout and stderr go to `/dev/null`
+by default so tailnet addresses and topology do not accumulate in persistent
+world-readable files; interactive script execution remains available for
+diagnostics.
+
 ## Failure Modes And Limits
 
 This repo reduces risk, but it does not remove all operational risk.
@@ -165,6 +221,7 @@ Things that can still go wrong:
 - a major macOS update resets `/etc/pf.conf`
 - a Mullvad or macOS DNS-path change makes tailnet hostnames unreliable until a domain-scoped resolver override is installed
 - live PF behavior on a given host differs from the stubbed smoke tests in this repo
+- an unrelated root process reloads the main PF ruleset outside the repo's preservation path
 
 The repo tries to reduce those risks by:
 
@@ -173,6 +230,7 @@ The repo tries to reduce those risks by:
 - validating staged `pf.conf` before reload
 - restoring the previous `pf.conf` automatically if PF rejects the new config
 - providing `verify.sh` for PF checks, optional resolver-override checks, and optional active checks
+- requiring the verifier to establish PF enablement, the exact runtime rule set, Mullvad attachment/rules, anchor order, connection state, and lockdown mode
 - offering an optional pf-watcher LaunchDaemon that reattaches the anchor to Tailscale's current interface without widening the exception
 
 ## Why This Repo Uses Standalone Mullvad Instead Of The Tailscale Mullvad Add-On

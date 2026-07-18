@@ -84,6 +84,9 @@ bash -n install-tailscaled-daemon.sh
 bash -n uninstall-tailscaled-daemon.sh
 bash -n install-tailnet-resolver.sh
 bash -n uninstall-tailnet-resolver.sh
+bash -n install-pf-watcher.sh
+bash -n uninstall-pf-watcher.sh
+bash -n refresh-anchor.sh
 bash -n lib/common.sh
 bash tests/run.sh
 ```

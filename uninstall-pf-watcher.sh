@@ -28,6 +28,16 @@ fi
 
 require_root
 
+if [[ -f "$PF_WATCHER_PLIST" ]] && ! plist_managed_by_repo "$PF_WATCHER_PLIST" && \
+  ! legacy_pf_watcher_plist_managed_by_repo "$PF_WATCHER_PLIST"; then
+  die "$PF_WATCHER_PLIST is not recognized as repo-managed. Refusing to stop or remove it."
+fi
+
+if [[ -d "$PF_WATCHER_INSTALL_DIR" ]] && ! pf_watcher_payload_managed_by_repo && \
+  ! legacy_pf_watcher_payload_managed_by_repo; then
+  die "$PF_WATCHER_INSTALL_DIR is not recognized as a repo-managed payload. Refusing to remove it."
+fi
+
 echo "Stopping $PF_WATCHER_LABEL if it is loaded ..."
 bootout_launchd "$PF_WATCHER_LABEL" || true
 
@@ -38,11 +48,9 @@ else
   echo "LaunchDaemon plist not found, skipping."
 fi
 
-if [[ -n "$PF_WATCHER_INSTALL_DIR" && -d "$PF_WATCHER_INSTALL_DIR" && -f "$PF_WATCHER_INSTALL_DIR/refresh-anchor.sh" ]]; then
+if [[ -n "$PF_WATCHER_INSTALL_DIR" && -d "$PF_WATCHER_INSTALL_DIR" ]]; then
   echo "Removing $PF_WATCHER_INSTALL_DIR ..."
   "$RM_BIN" -rf "$PF_WATCHER_INSTALL_DIR"
-elif [[ -d "$PF_WATCHER_INSTALL_DIR" ]]; then
-  echo "Refusing to remove $PF_WATCHER_INSTALL_DIR: it does not contain refresh-anchor.sh and does not look like a watcher payload. Remove it manually if you are sure."
 else
   echo "Watcher payload directory not found, skipping."
 fi
