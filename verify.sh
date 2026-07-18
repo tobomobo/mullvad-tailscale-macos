@@ -144,25 +144,25 @@ else
     fail "PF is not enabled"
   fi
 
-  if anchors="$(pf_list_anchors)"; then
-    if pf_anchor_is_attached "$TAILSCALE_ANCHOR_NAME" "$anchors"; then
-      pass "Tailscale anchor is attached to the main PF ruleset"
+  if main_anchor_calls="$(pf_main_anchor_calls)"; then
+    if pf_main_anchor_is_called "$TAILSCALE_ANCHOR_NAME" "$main_anchor_calls"; then
+      pass "The main PF ruleset calls the Tailscale anchor"
     else
-      fail "Tailscale anchor is not attached to the main PF ruleset"
+      fail "The Tailscale ruleset is loaded but the main PF ruleset does not call it"
     fi
-    if pf_anchor_is_attached "$MULLVAD_ANCHOR_NAME" "$anchors"; then
-      pass "Mullvad anchor is attached to the main PF ruleset"
+    if pf_main_anchor_is_called "$MULLVAD_ANCHOR_NAME" "$main_anchor_calls"; then
+      pass "The main PF ruleset calls the Mullvad anchor"
       mullvad_anchor_rules="$(pf_anchor_rules "$MULLVAD_ANCHOR_NAME" 2>/dev/null || true)"
       if [[ -n "$mullvad_anchor_rules" ]]; then
         pass "Mullvad anchor contains active firewall rules"
       else
-        fail "Mullvad anchor is attached but contains no active firewall rules"
+        fail "The called Mullvad anchor contains no active firewall rules"
       fi
     else
-      fail "Mullvad anchor is not attached; lockdown cannot be established from PF state"
+      fail "The main PF ruleset does not call the Mullvad anchor; lockdown cannot be established from PF state"
     fi
   else
-    fail "Unable to inspect attached PF anchors"
+    fail "Unable to inspect main PF anchor calls"
   fi
 
   anchor_rules="$(pf_anchor_rules "$TAILSCALE_ANCHOR_NAME" 2>/dev/null || true)"
@@ -170,9 +170,12 @@ else
     pass "Runtime Tailscale anchor exactly matches the expected four-rule policy"
   else
     fail "Runtime Tailscale anchor is missing, broadened, duplicated, or targets the wrong interface"
+    if [[ -n "$installed_interface" ]]; then
+      print_anchor_runtime_mismatch "$anchor_rules" "$installed_interface"
+    fi
   fi
 
-  if pf_anchor_precedes "$TAILSCALE_ANCHOR_NAME" "$MULLVAD_ANCHOR_NAME"; then
+  if [[ -n "${main_anchor_calls:-}" ]] && pf_anchor_precedes "$TAILSCALE_ANCHOR_NAME" "$MULLVAD_ANCHOR_NAME" "$main_anchor_calls"; then
     pass "Tailscale's quick exception is evaluated before Mullvad's anchor"
   else
     fail "Unable to establish that the Tailscale anchor precedes Mullvad's blocking anchor"
@@ -207,7 +210,7 @@ mullvad_lockdown_output="$(mullvad_lockdown_status 2>/dev/null || true)"
 if [[ -n "$mullvad_lockdown_output" ]] && mullvad_lockdown_is_enabled "$mullvad_lockdown_output"; then
   pass "Mullvad lockdown mode is enabled"
 elif [[ -n "$mullvad_lockdown_output" ]]; then
-  fail "Mullvad lockdown mode is not enabled"
+  fail "Mullvad lockdown mode is not enabled (enable it with: mullvad lockdown-mode set on)"
 else
   fail "Unable to query Mullvad lockdown mode"
 fi
@@ -215,6 +218,11 @@ fi
 if [[ -f "$TAILSCALED_DAEMON_PLIST" ]]; then
   if plist_managed_by_repo "$TAILSCALED_DAEMON_PLIST"; then
     pass "Repo-managed tailscaled LaunchDaemon plist exists"
+    if launchdaemon_loaded; then
+      pass "Repo-managed tailscaled LaunchDaemon is loaded"
+    else
+      fail "Repo-managed tailscaled LaunchDaemon is not loaded (inspect with: sudo launchctl print $(launchdaemon_service_target))"
+    fi
     if plist_uses_program "$TAILSCALED_DAEMON_PLIST" "$TAILSCALED_MANAGED_BIN" && \
       [[ -x "$TAILSCALED_MANAGED_BIN" ]] && file_is_root_owned_and_not_writable "$TAILSCALED_MANAGED_BIN"; then
       pass "tailscaled LaunchDaemon uses a protected root-owned binary copy"
@@ -228,6 +236,11 @@ if [[ -f "$TAILSCALED_DAEMON_PLIST" ]]; then
     fi
   else
     warn "$TAILSCALED_DAEMON_PLIST exists but is not marked as managed by this repo"
+    if launchdaemon_loaded; then
+      pass "The unmarked tailscaled LaunchDaemon is loaded"
+    else
+      warn "The unmarked tailscaled LaunchDaemon is not loaded (inspect it before adopting it with install-tailscaled-daemon.sh --replace-existing)"
+    fi
   fi
 elif [[ "$tailscaled_running" -eq 1 ]]; then
   pass "No repo-managed tailscaled LaunchDaemon plist found; tailscaled appears to be managed elsewhere"
@@ -247,6 +260,11 @@ if [[ -f "$PF_WATCHER_PLIST" ]]; then
     pass "PF watcher does not persist stdout/stderr metadata logs"
   else
     fail "PF watcher persists stdout/stderr; reinstall it to use the secure logging default"
+  fi
+  if launchd_loaded "$PF_WATCHER_LABEL"; then
+    pass "PF watcher LaunchDaemon is loaded"
+  else
+    fail "PF watcher LaunchDaemon is not loaded (reinstall it and inspect launchctl errors)"
   fi
 fi
 

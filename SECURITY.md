@@ -45,11 +45,17 @@ attaches its `mullvad` anchor dynamically, so reloading only the persistent
 rules still exist.
 
 For a full reload initiated by this repo, the shared update path snapshots the
-attached anchors and Mullvad's rules, refuses unknown dynamic attachments, adds
-a runtime-only Mullvad anchor call after the Tailscale exception, and verifies
-that Mullvad's rules are unchanged afterward. A failed load or post-check uses
-the same Mullvad-preserving path to restore and recheck the previous file and
-runtime ruleset.
+anchor calls in the active main ruleset and Mullvad's rules, refuses unknown
+dynamic calls, adds a runtime-only Mullvad anchor call after the Tailscale
+exception, and verifies that protected calls and Mullvad's rules are unchanged
+afterward. A failed load or post-check uses the same Mullvad-preserving path to
+restore and recheck the previous file and runtime ruleset.
+
+A named ruleset can remain populated even when the main PF ruleset no longer
+calls it. Therefore `pfctl -s Anchors` and `pfctl -a tailscale -sr` are not used
+as proof that the exception is active. Installation and verification parse the
+actual top-level anchor calls reported by `pfctl -sr` and require Tailscale to
+precede Mullvad when both calls are present.
 
 This protection applies only to reloads performed through these scripts. A
 different administrator or application can still invoke `pfctl -f` directly.
@@ -77,8 +83,9 @@ sudo bash verify.sh --tailnet-target <peer> --magicdns-name <peer>.your-tailnet.
 curl https://am.i.mullvad.net/connected
 ```
 
-The verifier now fails if PF is disabled, either core anchor is detached, the
-Tailscale runtime policy contains anything beyond the four expected rules,
+The verifier now fails if PF is disabled, either core anchor lacks an active
+main-ruleset call, the Tailscale runtime policy contains anything beyond the
+four expected rules,
 Mullvad is ordered before the exception, or Mullvad connection/lockdown state is
 missing. Those checks establish the inspected state at that moment; they are not
 a proof against every future macOS, Mullvad, routing, or DNS change.
@@ -187,7 +194,7 @@ This is also why the repo's active verifier should treat "TSMP reachability work
 
 A natural temptation when Tailscale's `utun` number changes is to drop the interface from the anchor rules so they match on any interface. This repo deliberately does not do that by default: `100.64.0.0/10` is RFC 6598 CGNAT space that some networks use on the physical link, so an interface-independent `pass` rule would widen the kill-switch exception beyond the tunnel.
 
-Instead, the optional `install-pf-watcher.sh` LaunchDaemon reattaches the anchor to Tailscale's current interface, using the same render, validate, and reload path as `install.sh`. It re-checks periodically (about every two minutes, which is what guarantees recovery) and also when the DNS resolver configuration changes, so reattachment happens within roughly the poll interval rather than instantly. That keeps the exception scoped to the active Tailscale tunnel while staying robust to interface renumbering. It reloads only the runtime anchor and does not modify `/etc/pf.conf`.
+The watcher LaunchDaemon installed by default reattaches the anchor to Tailscale's current interface, using the same render, validate, and reload path as `install.sh`. It re-checks periodically (about every two minutes, which is what guarantees recovery) and also when the DNS resolver configuration changes, so reattachment happens within roughly the poll interval rather than instantly. That keeps the exception scoped to the active Tailscale tunnel while staying robust to interface renumbering. It normally reloads only the runtime anchor. If the named ruleset is loaded but its main-ruleset call is missing or follows Mullvad, it safely reloads the unchanged managed `/etc/pf.conf` through the shared Mullvad-preserving transaction. `install-pf-watcher.sh` and `uninstall-pf-watcher.sh` remain available for granular lifecycle control.
 
 Interface discovery does not accept the first `utun` with an arbitrary `100.x`
 address. It asks `tailscale ip` for this node's exact IPv4/IPv6 identity and then
@@ -208,7 +215,9 @@ or must match the exact narrow legacy anchor policy. Installers and uninstallers
 refuse unrecognized collisions. LaunchDaemon stdout and stderr go to `/dev/null`
 by default so tailnet addresses and topology do not accumulate in persistent
 world-readable files; interactive script execution remains available for
-diagnostics.
+diagnostics. Installers also require `launchctl print` to confirm that a newly
+bootstrapped job is loaded, and the verifier reports job loading separately from
+plist presence and process presence.
 
 ## Failure Modes And Limits
 
