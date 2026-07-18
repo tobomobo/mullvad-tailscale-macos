@@ -74,6 +74,10 @@ if [[ "${1:-}" == "-a" && "${2:-}" == "tailscale" && "${3:-}" == "-sr" ]]; then
         for (i = 1; i <= in_count; i++) print incoming[i]
       }
     ' "$ANCHOR_FILE"
+    reload_count="$(grep -Ec '^-f ' "$TEST_LOG_DIR/pfctl.calls" || true)"
+    if [[ "${PFCTL_BROADEN_TAILSCALE_AFTER_RELOAD:-0}" == "1" && "$reload_count" -ge 1 ]]; then
+      printf '%s\n' "pass quick all"
+    fi
   fi
   exit 0
 fi
@@ -586,6 +590,32 @@ EOF
   assert_count "$workspace/pf.conf" 'set skip on lo0' 1
   assert_file_not_contains "$workspace/pf.conf" 'anchor "tailscale"'
   pass "install restores the original pf.conf when reload fails"
+}
+
+test_install_rolls_back_missing_anchor_after_postcheck_failure() {
+  local workspace
+  local reload_count
+  workspace="$(new_workspace install-missing-anchor-postcheck)"
+
+  cat > "$workspace/pf.conf" <<EOF
+set skip on lo0
+
+$ANCHOR_COMMENT
+anchor "tailscale"
+load anchor "tailscale" from "$workspace/pf.anchors/tailscale"
+EOF
+
+  PFCTL_MAIN_RULES='anchor "mullvad" all' \
+  PFCTL_BROADEN_TAILSCALE_AFTER_RELOAD=1 \
+  run_install_env "$workspace" --interface utun7 >/dev/null 2>&1 && \
+    fail "install should reject a broadened post-reload policy"
+
+  [[ ! -f "$workspace/pf.anchors/tailscale" ]] || fail "Expected rollback to restore the initially missing anchor file state"
+  assert_file_contains "$workspace/pf.conf" 'anchor "tailscale"'
+  assert_file_contains "$workspace/logs/pfctl.calls" "-a tailscale -F rules"
+  reload_count="$(grep -Ec '^-f ' "$workspace/logs/pfctl.calls" || true)"
+  [[ "$reload_count" == "2" ]] || fail "Expected one repair reload and one rollback reload, got $reload_count"
+  pass "install reloads the previous PF config before restoring an initially missing anchor file"
 }
 
 test_install_reports_watcher_bootstrap_failure() {
@@ -1351,6 +1381,35 @@ EOF
   pass "refresh repairs a loaded Tailscale ruleset that the main PF ruleset detached"
 }
 
+test_refresh_rolls_back_missing_anchor_after_postcheck_failure() {
+  local workspace
+  local reload_count
+  workspace="$(new_workspace refresh-missing-anchor-postcheck)"
+
+  cat > "$workspace/pf.conf" <<EOF
+set skip on lo0
+$ANCHOR_COMMENT
+anchor "tailscale"
+load anchor "tailscale" from "$workspace/pf.anchors/tailscale"
+EOF
+  cat > "$workspace/ifconfig/utun7" <<'EOF'
+utun7: flags=8051<UP,POINTOPOINT,RUNNING,MULTICAST> mtu 1280
+	inet 100.82.1.2 --> 100.82.1.2 netmask 0xffffffff
+EOF
+
+  IFCONFIG_LIST="lo0 utun7" \
+  PFCTL_MAIN_RULES='anchor "mullvad" all' \
+  PFCTL_BROADEN_TAILSCALE_AFTER_RELOAD=1 \
+  run_refresh_env "$workspace" >/dev/null 2>&1 && \
+    fail "refresh should reject a broadened post-reload policy"
+
+  [[ ! -f "$workspace/pf.anchors/tailscale" ]] || fail "Expected refresh rollback to restore the initially missing anchor file state"
+  assert_file_contains "$workspace/logs/pfctl.calls" "-a tailscale -F rules"
+  reload_count="$(grep -Ec '^-f ' "$workspace/logs/pfctl.calls" || true)"
+  [[ "$reload_count" == "2" ]] || fail "Expected one refresh reload and one rollback reload, got $reload_count"
+  pass "refresh reloads the previous PF config before restoring an initially missing anchor file"
+}
+
 test_refresh_reattaches_when_runtime_anchor_empty() {
   local workspace
   workspace="$(new_workspace refresh-runtime-empty)"
@@ -1623,6 +1682,7 @@ test_install_detects_interface_and_writes_anchor
 test_install_repairs_partial_anchor_block
 test_install_repairs_missing_anchor_detached_call_and_optimizer_order
 test_install_rolls_back_failed_pf_reload
+test_install_rolls_back_missing_anchor_after_postcheck_failure
 test_install_reports_watcher_bootstrap_failure
 test_install_preserves_live_mullvad_anchor_during_reload
 test_install_rolls_back_if_mullvad_changes_after_reload
@@ -1661,6 +1721,7 @@ test_watcher_scripts_refuse_unrecognized_artifacts
 test_refresh_reattaches_anchor_on_interface_change
 test_refresh_noop_when_interface_unchanged
 test_refresh_repairs_loaded_but_detached_anchor
+test_refresh_rolls_back_missing_anchor_after_postcheck_failure
 test_refresh_reattaches_when_runtime_anchor_empty
 test_refresh_fails_when_runtime_reload_fails
 test_refresh_refuses_when_mullvad_protection_is_missing

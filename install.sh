@@ -56,6 +56,31 @@ restore_previous_anchor_file() {
   fi
 }
 
+restore_previous_anchor_state() {
+  local failed=0
+
+  restore_previous_anchor_file || failed=1
+  if [[ "$anchor_existed" -eq 1 ]]; then
+    load_runtime_anchor "$ANCHOR_FILE" || failed=1
+  else
+    flush_runtime_anchor || failed=1
+  fi
+  return "$failed"
+}
+
+rollback_installed_state() {
+  local failed=0
+
+  # Reload the previous PF config while the newly rendered anchor file still
+  # exists. The previous config can legitimately contain its load line even
+  # when the file was missing before this repair attempt.
+  if [[ "$pf_conf_changed" -eq 1 ]]; then
+    apply_pf_conf_update "$backup_path" >/dev/null || failed=1
+  fi
+  restore_previous_anchor_state || failed=1
+  return "$failed"
+}
+
 if [[ -f "$ANCHOR_FILE" ]]; then
   anchor_file_managed_by_repo "$ANCHOR_FILE" || die "$ANCHOR_FILE exists but is not a recognized repo-managed anchor. Refusing to overwrite it."
   "$CP_BIN" "$ANCHOR_FILE" "$old_anchor"
@@ -85,14 +110,14 @@ if file_differs "$PF_CONF" "$tmp_pf_conf"; then
   pf_conf_changed=1
   echo "Applying PF config update ..."
   if ! backup_path="$(apply_pf_conf_update "$tmp_pf_conf")"; then
-    restore_previous_anchor_file
+    restore_previous_anchor_state || die "CRITICAL: the PF update failed and the previous Tailscale anchor state could not be restored."
     die "Failed to reload PF safely after updating $PF_CONF. Original configuration and anchor were restored."
   fi
   echo "Backed up $PF_CONF to $backup_path"
 else
   echo "pf.conf already contains the exact anchor block. Refreshing runtime anchor ..."
   if ! load_runtime_anchor "$ANCHOR_FILE"; then
-    restore_previous_anchor_file
+    restore_previous_anchor_state || die "CRITICAL: the runtime refresh failed and the previous Tailscale anchor state could not be restored."
     die "Failed to refresh runtime anchor rules; restored the previous anchor file."
   fi
 
@@ -100,7 +125,7 @@ else
     echo "The active main PF ruleset does not call Tailscale before Mullvad. Reloading the managed configuration safely ..."
     pf_conf_changed=1
     if ! backup_path="$(apply_pf_conf_update "$tmp_pf_conf")"; then
-      restore_previous_anchor_file
+      restore_previous_anchor_state || die "CRITICAL: the PF repair failed and the previous Tailscale anchor state could not be restored."
       die "Failed to restore the active Tailscale anchor call safely; the previous anchor file and PF configuration were restored."
     fi
     echo "Backed up $PF_CONF to $backup_path"
@@ -110,26 +135,12 @@ fi
 runtime_rules="$(pf_anchor_rules "$TAILSCALE_ANCHOR_NAME" 2>/dev/null || true)"
 if ! anchor_runtime_rules_are_exact "$runtime_rules" "$interface"; then
   print_anchor_runtime_mismatch "$runtime_rules" "$interface"
-  restore_previous_anchor_file
-  if [[ "$pf_conf_changed" -eq 1 ]]; then
-    apply_pf_conf_update "$backup_path" >/dev/null || die "CRITICAL: runtime anchor verification failed and the previous PF configuration could not be restored."
-  elif [[ "$anchor_existed" -eq 1 ]]; then
-    load_runtime_anchor "$ANCHOR_FILE" || die "CRITICAL: runtime anchor verification failed and the previous runtime anchor could not be restored."
-  else
-    flush_runtime_anchor || true
-  fi
+  rollback_installed_state || die "CRITICAL: runtime anchor verification failed and the previous PF and anchor state could not be restored."
   die "Loaded runtime anchor did not exactly match the expected four-rule policy; restored the previous configuration."
 fi
 
 if ! tailscale_main_anchor_call_is_safe; then
-  restore_previous_anchor_file
-  if [[ "$pf_conf_changed" -eq 1 ]]; then
-    apply_pf_conf_update "$backup_path" >/dev/null || die "CRITICAL: main PF anchor-call verification failed and the previous PF configuration could not be restored."
-  elif [[ "$anchor_existed" -eq 1 ]]; then
-    load_runtime_anchor "$ANCHOR_FILE" || die "CRITICAL: main PF anchor-call verification failed and the previous runtime anchor could not be restored."
-  else
-    flush_runtime_anchor || true
-  fi
+  rollback_installed_state || die "CRITICAL: main PF anchor-call verification failed and the previous PF and anchor state could not be restored."
   die "The main PF ruleset did not call Tailscale before Mullvad after installation; restored the previous configuration."
 fi
 

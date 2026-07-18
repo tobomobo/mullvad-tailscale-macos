@@ -92,6 +92,24 @@ if [[ -f "$ANCHOR_FILE" ]]; then
   anchor_existed=1
 fi
 
+restore_previous_anchor_state() {
+  local failed=0
+
+  if [[ "$pf_conf_reloaded" -eq 1 ]]; then
+    # Keep the new file in place until the previous PF config has reloaded; the
+    # prior config may contain a load line even if this file was initially absent.
+    apply_pf_conf_update "$backup_path" >/dev/null || failed=1
+  fi
+  if [[ "$anchor_existed" -eq 1 ]]; then
+    install_root_owned_file "$old_anchor" "$ANCHOR_FILE" || failed=1
+    load_runtime_anchor "$ANCHOR_FILE" || failed=1
+  else
+    "$RM_BIN" -f "$ANCHOR_FILE" || failed=1
+    flush_runtime_anchor || failed=1
+  fi
+  return "$failed"
+}
+
 render_anchor_template "$ANCHOR_TEMPLATE" "$tmp_anchor" "$interface"
 validate_anchor_policy_file "$tmp_anchor" "$interface" || die "Rendered anchor file is not the exact narrow policy or has syntax errors for $interface."
 
@@ -109,19 +127,14 @@ if [[ "$main_anchor_call_safe" -eq 0 ]]; then
   echo "Restoring the missing or misordered Tailscale call in the main PF ruleset ..."
   pf_conf_reloaded=1
   if ! backup_path="$(apply_pf_conf_update "$tmp_pf_conf")"; then
-    if [[ "$anchor_existed" -eq 1 ]]; then
-      install_root_owned_file "$old_anchor" "$ANCHOR_FILE"
-    else
-      "$RM_BIN" -f "$ANCHOR_FILE"
-    fi
+    # apply_pf_conf_update restores PF on failure, so only the anchor contents
+    # need to be restored here.
+    pf_conf_reloaded=0
+    restore_previous_anchor_state || die "CRITICAL: the PF repair failed and the previous Tailscale anchor state could not be restored."
     die "Failed to restore the active Tailscale anchor call safely; restored the previous anchor file and PF configuration."
   fi
 elif ! load_runtime_anchor "$ANCHOR_FILE"; then
-  if [[ "$anchor_existed" -eq 1 ]]; then
-    install_root_owned_file "$old_anchor" "$ANCHOR_FILE"
-  else
-    "$RM_BIN" -f "$ANCHOR_FILE"
-  fi
+  restore_previous_anchor_state || die "CRITICAL: the runtime refresh failed and the previous Tailscale anchor state could not be restored."
   die "Failed to reload the runtime anchor for $interface; restored the previous anchor file."
 fi
 
@@ -139,18 +152,7 @@ else
   echo "The main PF ruleset still does not call Tailscale before Mullvad." >&2
 fi
 if [[ "$runtime_policy_exact" -ne 1 || "$main_anchor_call_safe" -ne 1 ]]; then
-  if [[ "$anchor_existed" -eq 1 ]]; then
-    install_root_owned_file "$old_anchor" "$ANCHOR_FILE"
-  else
-    "$RM_BIN" -f "$ANCHOR_FILE"
-  fi
-  if [[ "$pf_conf_reloaded" -eq 1 ]]; then
-    apply_pf_conf_update "$backup_path" >/dev/null || die "CRITICAL: verification failed and the previous PF configuration could not be restored."
-  elif [[ "$anchor_existed" -eq 1 ]]; then
-    load_runtime_anchor "$ANCHOR_FILE" || die "CRITICAL: runtime verification failed and the previous anchor could not be restored."
-  else
-    flush_runtime_anchor || true
-  fi
+  restore_previous_anchor_state || die "CRITICAL: verification failed and the previous PF and anchor state could not be restored."
   die "The refreshed runtime policy or main PF anchor call failed verification; restored the previous configuration."
 fi
 
