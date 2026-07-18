@@ -8,7 +8,8 @@ Read these first:
 
 1. `AGENTS.md`
 2. `README.md`
-3. `lib/common.sh`
+3. The relevant file under `docs/` or `SECURITY.md`
+4. `lib/common.sh`
 
 `AGENTS.md` contains the repo-wide invariants. Follow it unless the user explicitly asks for a different direction.
 
@@ -28,7 +29,7 @@ A good change in this repo usually does all of the following:
 
 - Prefer making one coherent change through the shared helper layer instead of scattering shell logic across scripts.
 - If a behavior belongs in more than one script, put it in `lib/common.sh`.
-- If you change user-visible behavior, update `README.md` in the same pass.
+- If you change user-visible behavior, update the concise `README.md` path or the relevant focused guide in the same pass.
 - If you change safety-sensitive behavior, add or update a smoke test in `tests/run.sh`.
 - When reviewing, prioritize bugs, regressions, security posture, and doc drift over style.
 
@@ -44,6 +45,9 @@ bash -n install-tailscaled-daemon.sh
 bash -n uninstall-tailscaled-daemon.sh
 bash -n install-tailnet-resolver.sh
 bash -n uninstall-tailnet-resolver.sh
+bash -n install-pf-watcher.sh
+bash -n uninstall-pf-watcher.sh
+bash -n refresh-anchor.sh
 bash -n lib/common.sh
 ```
 

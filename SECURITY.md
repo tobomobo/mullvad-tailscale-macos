@@ -1,4 +1,6 @@
-# SECURITY.md
+# Security Model
+
+[Quick start](README.md) · [Operations](docs/operations.md) · [Troubleshooting](docs/troubleshooting.md)
 
 This document describes the security model and tradeoffs of this workaround. It is not a claim that the repo has undergone a formal security audit.
 

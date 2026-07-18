@@ -41,7 +41,13 @@ If you are an agent making changes here, optimize for safety first. This repo mo
 - `tests/run.sh`
   Stubbed smoke tests for core safety and behavior.
 - `README.md`
-  Must stay aligned with code and should not overclaim what is guaranteed.
+  Concise user entry point. Keep the default install and verify path easy to scan.
+- `docs/operations.md`
+  Component scripts, maintenance, optional services, and removal.
+- `docs/troubleshooting.md`
+  PF, launchd, DNS, MagicDNS, content-blocker, and DERP diagnosis.
+- `SECURITY.md`
+  Trust boundaries, PF transaction model, limitations, and security claims.
 
 ## Non-Negotiable Invariants
 
@@ -59,7 +65,7 @@ If you are an agent making changes here, optimize for safety first. This repo mo
 
 ## Safe Workflow
 
-1. Read `README.md`, `lib/common.sh`, and the script you plan to touch.
+1. Read `README.md`, the relevant focused guide, `lib/common.sh`, and the script you plan to touch.
 2. Prefer changing shared behavior in `lib/common.sh` instead of duplicating logic.
 3. Keep the anchor-management path deterministic:
    - detect interface
@@ -108,7 +114,7 @@ If you changed only docs, note that the smoke tests were not rerun if you choose
 - Does the change preserve interface correctness when Tailscale is not `utun0`?
 - Does it keep `pf.conf` edits exact and reversible?
 - Does it preserve or improve test coverage?
-- Does the README still match the actual scripts?
+- Do the README and focused guides still match the actual scripts without duplicating unnecessary detail?
 - Does any DNS or MagicDNS check account for `/etc/hosts`, `dscacheutil`, and resolver precedence under Mullvad?
 - Are security statements precise and evidence-based?
 
