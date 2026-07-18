@@ -482,26 +482,30 @@ load_runtime_anchor() {
   "$PFCTL_BIN" -a "$TAILSCALE_ANCHOR_NAME" -f "$file" >/dev/null 2>&1
 }
 
-pf_list_anchors() {
-  local output
+pf_main_anchor_calls() {
+  local rules
 
-  output="$("$PFCTL_BIN" -s Anchors 2>/dev/null)" || return 1
-  awk 'NF { print $1 }' <<<"$output"
+  rules="$("$PFCTL_BIN" -sr 2>/dev/null)" || return 1
+  awk '$1 == "anchor" {
+    name=$2
+    gsub(/^"|"$/, "", name)
+    print name
+  }' <<<"$rules"
 }
 
-pf_anchor_is_attached() {
+pf_main_anchor_is_called() {
   local anchor="$1"
-  local anchors
+  local anchor_calls
 
   if [[ $# -ge 2 ]]; then
-    anchors="$2"
+    anchor_calls="$2"
   else
-    anchors="$(pf_list_anchors)" || return 1
+    anchor_calls="$(pf_main_anchor_calls)" || return 1
   fi
-  grep -Fqx -- "$anchor" <<<"$anchors"
+  grep -Fqx -- "$anchor" <<<"$anchor_calls"
 }
 
-pf_anchor_list_contains_all() {
+pf_anchor_call_list_contains_all() {
   local expected="$1"
   local actual="$2"
   local ignored_anchor="${3:-}"
@@ -526,14 +530,28 @@ pf_is_enabled() {
 pf_anchor_precedes() {
   local first="$1"
   local second="$2"
-  local rules
+  local anchor_calls
 
-  rules="$("$PFCTL_BIN" -sr 2>/dev/null)" || return 1
-  awk -v first="\"$first\"" -v second="\"$second\"" '
-    $1 == "anchor" && $2 == first && !first_line { first_line=NR }
-    $1 == "anchor" && $2 == second && !second_line { second_line=NR }
+  if [[ $# -ge 3 ]]; then
+    anchor_calls="$3"
+  else
+    anchor_calls="$(pf_main_anchor_calls)" || return 1
+  fi
+  awk -v first="$first" -v second="$second" '
+    $0 == first && !first_line { first_line=NR }
+    $0 == second && !second_line { second_line=NR }
     END { exit !(first_line && second_line && first_line < second_line) }
-  ' <<<"$rules"
+  ' <<<"$anchor_calls"
+}
+
+tailscale_main_anchor_call_is_safe() {
+  local anchor_calls
+
+  anchor_calls="$(pf_main_anchor_calls)" || return 1
+  pf_main_anchor_is_called "$TAILSCALE_ANCHOR_NAME" "$anchor_calls" || return 1
+  if pf_main_anchor_is_called "$MULLVAD_ANCHOR_NAME" "$anchor_calls"; then
+    pf_anchor_precedes "$TAILSCALE_ANCHOR_NAME" "$MULLVAD_ANCHOR_NAME" "$anchor_calls"
+  fi
 }
 
 file_is_root_owned_and_not_writable() {
@@ -593,12 +611,12 @@ mullvad_protection_is_expected() {
 }
 
 mullvad_pf_protection_is_consistent() {
-  local anchors
+  local anchor_calls
   local rules
 
   mullvad_protection_is_expected || return 0
-  anchors="$(pf_list_anchors)" || return 1
-  pf_anchor_is_attached "$MULLVAD_ANCHOR_NAME" "$anchors" || return 1
+  anchor_calls="$(pf_main_anchor_calls)" || return 1
+  pf_main_anchor_is_called "$MULLVAD_ANCHOR_NAME" "$anchor_calls" || return 1
   rules="$(pf_anchor_rules "$MULLVAD_ANCHOR_NAME")" || return 1
   [[ -n "$rules" ]]
 }
@@ -614,11 +632,11 @@ append_runtime_mullvad_anchor() {
 
 restore_pf_conf_and_runtime() {
   local previous_conf="$1"
-  local anchors_before="$2"
+  local anchor_calls_before="$2"
   local preserve_mullvad="$3"
   local mullvad_rules_before="$4"
   local rollback_conf
-  local anchors_after
+  local anchor_calls_after
 
   rollback_conf="$(make_temp_file pf-rollback-conf)"
   "$CP_BIN" "$previous_conf" "$PF_CONF"
@@ -633,8 +651,8 @@ restore_pf_conf_and_runtime() {
     return 1
   fi
 
-  anchors_after="$(pf_list_anchors 2>/dev/null || true)"
-  if ! pf_anchor_list_contains_all "$anchors_before" "$anchors_after"; then
+  anchor_calls_after="$(pf_main_anchor_calls 2>/dev/null || true)"
+  if ! pf_anchor_call_list_contains_all "$anchor_calls_before" "$anchor_calls_after"; then
     "$RM_BIN" -f "$rollback_conf"
     return 1
   fi
@@ -674,16 +692,16 @@ apply_pf_conf_update() {
   local new_conf="$1"
   local backup_path
   local runtime_conf
-  local anchors_before
+  local anchor_calls_before
   local mullvad_rules_before=""
   local mullvad_rules_after=""
   local preserve_mullvad=0
   local active_anchor
-  local anchors_after
+  local anchor_calls_after
   local postcheck_failed=0
 
-  anchors_before="$(pf_list_anchors)" || {
-    echo "Unable to inspect active PF anchors; refusing a full ruleset reload." >&2
+  anchor_calls_before="$(pf_main_anchor_calls)" || {
+    echo "Unable to inspect active main PF anchor calls; refusing a full ruleset reload." >&2
     return 1
   }
 
@@ -691,23 +709,23 @@ apply_pf_conf_update() {
     [[ -n "$active_anchor" ]] || continue
     if [[ "$active_anchor" != "$MULLVAD_ANCHOR_NAME" && "$active_anchor" != "$TAILSCALE_ANCHOR_NAME" ]] && \
       ! pf_conf_covers_anchor "$new_conf" "$active_anchor"; then
-      echo "Active PF anchor '$active_anchor' is not represented in the staged config; refusing to flush an unknown dynamic attachment." >&2
+      echo "Active main PF anchor call '$active_anchor' is not represented in the staged config; refusing to flush it." >&2
       return 1
     fi
-  done <<<"$anchors_before"
+  done <<<"$anchor_calls_before"
 
-  if pf_anchor_is_attached "$MULLVAD_ANCHOR_NAME" "$anchors_before"; then
+  if pf_main_anchor_is_called "$MULLVAD_ANCHOR_NAME" "$anchor_calls_before"; then
     preserve_mullvad=1
     mullvad_rules_before="$(pf_anchor_rules "$MULLVAD_ANCHOR_NAME")" || {
       echo "Unable to snapshot Mullvad's active PF rules; refusing a full ruleset reload." >&2
       return 1
     }
     if mullvad_protection_is_expected && [[ -z "$mullvad_rules_before" ]]; then
-      echo "Mullvad reports active protection, but its attached PF anchor is empty. Refusing to reload PF." >&2
+      echo "Mullvad reports active protection, but its called PF anchor is empty. Refusing to reload PF." >&2
       return 1
     fi
   elif mullvad_protection_is_expected; then
-    echo "Mullvad reports an active connection or lockdown mode, but its PF anchor is not attached. Refusing to reload PF." >&2
+    echo "Mullvad reports an active connection or lockdown mode, but the main PF ruleset does not call its anchor. Refusing to reload PF." >&2
     return 1
   fi
 
@@ -727,7 +745,7 @@ apply_pf_conf_update() {
   "$CP_BIN" "$new_conf" "$PF_CONF"
 
   if ! reload_pf_conf "$runtime_conf"; then
-    if ! restore_pf_conf_and_runtime "$backup_path" "$anchors_before" "$preserve_mullvad" "$mullvad_rules_before"; then
+    if ! restore_pf_conf_and_runtime "$backup_path" "$anchor_calls_before" "$preserve_mullvad" "$mullvad_rules_before"; then
       "$RM_BIN" -f "$runtime_conf"
       echo "CRITICAL: the PF reload failed and the previous runtime ruleset could not be re-established. Disconnect this Mac from untrusted networks and reapply Mullvad immediately." >&2
       return 1
@@ -737,21 +755,21 @@ apply_pf_conf_update() {
     return 1
   fi
 
-  anchors_after="$(pf_list_anchors 2>/dev/null || true)"
-  if ! pf_anchor_list_contains_all "$anchors_before" "$anchors_after" "$TAILSCALE_ANCHOR_NAME"; then
+  anchor_calls_after="$(pf_main_anchor_calls 2>/dev/null || true)"
+  if ! pf_anchor_call_list_contains_all "$anchor_calls_before" "$anchor_calls_after" "$TAILSCALE_ANCHOR_NAME"; then
     postcheck_failed=1
   fi
 
   if [[ "$preserve_mullvad" -eq 1 ]]; then
     mullvad_rules_after="$(pf_anchor_rules "$MULLVAD_ANCHOR_NAME" 2>/dev/null || true)"
-    if ! pf_anchor_is_attached "$MULLVAD_ANCHOR_NAME" "$anchors_after" || [[ "$mullvad_rules_after" != "$mullvad_rules_before" ]]; then
+    if ! pf_main_anchor_is_called "$MULLVAD_ANCHOR_NAME" "$anchor_calls_after" || [[ "$mullvad_rules_after" != "$mullvad_rules_before" ]]; then
       postcheck_failed=1
     fi
   fi
 
   if [[ "$postcheck_failed" -eq 1 ]]; then
-    echo "A protected PF attachment or Mullvad's rules changed during reload; restoring the previous configuration." >&2
-    if ! restore_pf_conf_and_runtime "$backup_path" "$anchors_before" "$preserve_mullvad" "$mullvad_rules_before"; then
+    echo "A protected main PF anchor call or Mullvad's rules changed during reload; restoring the previous configuration." >&2
+    if ! restore_pf_conf_and_runtime "$backup_path" "$anchor_calls_before" "$preserve_mullvad" "$mullvad_rules_before"; then
       "$RM_BIN" -f "$runtime_conf"
       echo "CRITICAL: failed to restore the previous PF runtime ruleset. Disconnect this Mac from untrusted networks and reapply Mullvad immediately." >&2
       return 1
@@ -908,8 +926,11 @@ bootstrap_launchd() {
   local plist="$1"
   local label="$2"
 
-  "$LAUNCHCTL_BIN" bootstrap system "$plist" >/dev/null 2>&1
-  "$LAUNCHCTL_BIN" kickstart -k "system/$label" >/dev/null 2>&1
+  # Keep launchctl's stderr visible during an interactive install. Suppressing
+  # it previously reduced a failed bootstrap to an unactionable generic error.
+  "$LAUNCHCTL_BIN" bootstrap system "$plist" >/dev/null || return 1
+  "$LAUNCHCTL_BIN" kickstart -k "system/$label" >/dev/null || return 1
+  launchd_loaded "$label"
 }
 
 launchdaemon_service_target() {

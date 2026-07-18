@@ -85,5 +85,6 @@ fi
 
 echo ""
 echo "Done. tailscaled will now start at boot via launchd."
+echo "Verified loaded service: $(launchdaemon_service_target)"
 echo "Standard output and error are discarded by default to avoid persistent tailnet metadata logs."
 echo "Authenticate with: tailscale up"

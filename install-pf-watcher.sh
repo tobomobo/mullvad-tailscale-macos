@@ -15,8 +15,10 @@ configuration changes. This keeps the anchor's interface binding correct across
 Tailscale restarts without widening the PF exception to all interfaces.
 
 Run install.sh first; the watcher only reattaches the anchor, it does not add
-the anchor lines to /etc/pf.conf. Use --replace-existing only after checking an
-unrecognized existing plist or payload directory.
+the anchor lines to /etc/pf.conf. If another PF reload detached that existing
+call, the watcher restores it through the rollback-safe reload path. Use
+--replace-existing only after checking an unrecognized existing plist or
+payload directory.
 EOF
 }
 
@@ -95,4 +97,5 @@ fi
 echo ""
 echo "Done. The pf-watcher will reattach the anchor to Tailscale's current interface"
 echo "(it re-checks about every two minutes and on DNS resolver changes)."
+echo "Verified loaded service: $(launchd_service_target "$PF_WATCHER_LABEL")"
 echo "Routine output is discarded by default to avoid persistent tailnet metadata logs."

@@ -11,7 +11,8 @@ Usage: sudo bash install.sh [--interface utunX]
 Installs or updates the PF anchor that lets Tailscale traffic pass alongside
 Mullvad's PF-based kill switch. By default the script auto-detects the active
 Tailscale utun interface by matching the output of tailscale ip to the current ifconfig
-output. Full PF reloads preserve and recheck Mullvad's active anchor.
+output. It also installs or updates the automatic PF watcher. Full PF reloads
+preserve and recheck Mullvad's active anchor.
 EOF
 }
 
@@ -89,10 +90,20 @@ if file_differs "$PF_CONF" "$tmp_pf_conf"; then
   fi
   echo "Backed up $PF_CONF to $backup_path"
 else
-  echo "pf.conf already contains the exact anchor block. Refreshing runtime anchor only ..."
+  echo "pf.conf already contains the exact anchor block. Refreshing runtime anchor ..."
   if ! load_runtime_anchor "$ANCHOR_FILE"; then
     restore_previous_anchor_file
     die "Failed to refresh runtime anchor rules; restored the previous anchor file."
+  fi
+
+  if ! tailscale_main_anchor_call_is_safe; then
+    echo "The active main PF ruleset does not call Tailscale before Mullvad. Reloading the managed configuration safely ..."
+    pf_conf_changed=1
+    if ! backup_path="$(apply_pf_conf_update "$tmp_pf_conf")"; then
+      restore_previous_anchor_file
+      die "Failed to restore the active Tailscale anchor call safely; the previous anchor file and PF configuration were restored."
+    fi
+    echo "Backed up $PF_CONF to $backup_path"
   fi
 fi
 
@@ -110,10 +121,28 @@ if ! anchor_runtime_rules_are_exact "$runtime_rules" "$interface"; then
   die "Loaded runtime anchor did not exactly match the expected four-rule policy; restored the previous configuration."
 fi
 
+if ! tailscale_main_anchor_call_is_safe; then
+  restore_previous_anchor_file
+  if [[ "$pf_conf_changed" -eq 1 ]]; then
+    apply_pf_conf_update "$backup_path" >/dev/null || die "CRITICAL: main PF anchor-call verification failed and the previous PF configuration could not be restored."
+  elif [[ "$anchor_existed" -eq 1 ]]; then
+    load_runtime_anchor "$ANCHOR_FILE" || die "CRITICAL: main PF anchor-call verification failed and the previous runtime anchor could not be restored."
+  else
+    flush_runtime_anchor || true
+  fi
+  die "The main PF ruleset did not call Tailscale before Mullvad after installation; restored the previous configuration."
+fi
+
 echo ""
 echo "Done. Verifying anchor is loaded:"
 "$PFCTL_BIN" -a "$TAILSCALE_ANCHOR_NAME" -sr 2>/dev/null || true
 
 echo ""
-echo "Installed the interface-scoped Tailscale PF exception on $interface."
+echo "Installing or updating the automatic PF watcher ..."
+if ! /bin/bash "$SCRIPT_DIR/install-pf-watcher.sh"; then
+  die "The PF exception is active, but the watcher could not be installed. Review the launchctl error and rerun install-pf-watcher.sh."
+fi
+
+echo ""
+echo "Installed the interface-scoped Tailscale PF exception on $interface and its automatic watcher."
 echo "Run sudo bash verify.sh while Mullvad is connected to validate the combined live state."
