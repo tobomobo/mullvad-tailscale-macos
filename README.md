@@ -67,6 +67,12 @@ Install the PF fix:
 sudo bash install.sh
 ```
 
+The installer accepts PF's harmless runtime reordering of those four independent
+rules, but still rejects missing, duplicated, or additional rules. If runtime
+verification fails, it prints both the expected policy and the rules PF actually
+reported before rolling back. An existing managed `pf.conf` block with a missing
+anchor file is repaired automatically on the next successful install.
+
 If Tailscale is not running yet and the script cannot auto-detect its active interface:
 
 ```bash

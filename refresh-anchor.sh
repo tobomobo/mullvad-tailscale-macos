@@ -97,6 +97,7 @@ fi
 
 runtime_rules="$(pf_anchor_rules "$TAILSCALE_ANCHOR_NAME" 2>/dev/null || true)"
 if ! anchor_runtime_rules_are_exact "$runtime_rules" "$interface"; then
+  print_anchor_runtime_mismatch "$runtime_rules" "$interface"
   if [[ "$anchor_existed" -eq 1 ]]; then
     install_root_owned_file "$old_anchor" "$ANCHOR_FILE"
     load_runtime_anchor "$ANCHOR_FILE" || die "CRITICAL: runtime verification failed and the previous anchor could not be restored."

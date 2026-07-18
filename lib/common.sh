@@ -308,10 +308,32 @@ anchor_runtime_rules_are_exact() {
   local interface="$2"
   local normalized
   local expected
+  local expected_rule
 
   normalized="$(sed -E 's/ flags S\/SA no state$/ no state/' <<<"$rules" | awk 'NF { print }')"
   expected="$(expected_anchor_rules "$interface")" || return 1
-  [[ "$normalized" == "$expected" ]]
+
+  # PF's optimizer can reorder independent rules when it loads an anchor. The
+  # security contract is the exact four-rule set, not the template's display
+  # order: require four lines and exactly one occurrence of every expected rule.
+  [[ "$(awk 'NF { count++ } END { print count + 0 }' <<<"$normalized")" == "4" ]] || return 1
+  while IFS= read -r expected_rule; do
+    [[ "$(grep -Fxc -- "$expected_rule" <<<"$normalized" || true)" == "1" ]] || return 1
+  done <<<"$expected"
+}
+
+print_anchor_runtime_mismatch() {
+  local rules="$1"
+  local interface="$2"
+
+  echo "Expected exactly these four rules (their runtime order may differ):" >&2
+  expected_anchor_rules "$interface" | sed 's/^/  /' >&2
+  echo "PF reported:" >&2
+  if [[ -n "$rules" ]]; then
+    sed 's/^/  /' <<<"$rules" >&2
+  else
+    echo "  <no rules>" >&2
+  fi
 }
 
 anchor_file_managed_by_repo() {

@@ -170,6 +170,9 @@ else
     pass "Runtime Tailscale anchor exactly matches the expected four-rule policy"
   else
     fail "Runtime Tailscale anchor is missing, broadened, duplicated, or targets the wrong interface"
+    if [[ -n "$installed_interface" ]]; then
+      print_anchor_runtime_mismatch "$anchor_rules" "$installed_interface"
+    fi
   fi
 
   if pf_anchor_precedes "$TAILSCALE_ANCHOR_NAME" "$MULLVAD_ANCHOR_NAME"; then
@@ -207,7 +210,7 @@ mullvad_lockdown_output="$(mullvad_lockdown_status 2>/dev/null || true)"
 if [[ -n "$mullvad_lockdown_output" ]] && mullvad_lockdown_is_enabled "$mullvad_lockdown_output"; then
   pass "Mullvad lockdown mode is enabled"
 elif [[ -n "$mullvad_lockdown_output" ]]; then
-  fail "Mullvad lockdown mode is not enabled"
+  fail "Mullvad lockdown mode is not enabled (enable it with: mullvad lockdown-mode set on)"
 else
   fail "Unable to query Mullvad lockdown mode"
 fi

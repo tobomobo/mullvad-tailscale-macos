@@ -62,7 +62,18 @@ if [[ "${1:-}" == "-a" && "${2:-}" == "tailscale" && "${3:-}" == "-sr" ]]; then
   if [[ -n "${PFCTL_ANCHOR_RULES+x}" ]] && ! grep -Eq '^-a tailscale -f ' "$TEST_LOG_DIR/pfctl.calls"; then
     printf '%s\n' "$PFCTL_ANCHOR_RULES"
   elif [[ -f "$ANCHOR_FILE" ]]; then
-    awk 'NF && $1 != "#" { print }' "$ANCHOR_FILE"
+    # Match macOS PF's observed optimizer order: independent outbound rules are
+    # printed before inbound rules, regardless of their template order.
+    awk '
+      NF && $1 != "#" {
+        if ($2 == "out") outgoing[++out_count] = $0
+        else if ($2 == "in") incoming[++in_count] = $0
+      }
+      END {
+        for (i = 1; i <= out_count; i++) print outgoing[i]
+        for (i = 1; i <= in_count; i++) print incoming[i]
+      }
+    ' "$ANCHOR_FILE"
   fi
   exit 0
 fi
@@ -480,6 +491,32 @@ EOF
   assert_count "$workspace/pf.conf" "load anchor \"tailscale\" from \"$workspace/pf.anchors/tailscale\"" 1
   assert_file_contains "$workspace/pf.anchors/tailscale" "pass out quick on utun9 inet from any to 100.64.0.0/10 no state"
   pass "install repairs a partial pf.conf block without duplicating lines"
+}
+
+test_install_repairs_missing_anchor_and_accepts_pf_optimizer_order() {
+  local workspace
+  local output
+  workspace="$(new_workspace install-repair-missing-anchor)"
+
+  cat > "$workspace/pf.conf" <<EOF
+set skip on lo0
+$ANCHOR_COMMENT
+anchor "tailscale"
+load anchor "tailscale" from "$workspace/pf.anchors/tailscale"
+EOF
+
+  cat > "$workspace/ifconfig/utun7" <<'EOF'
+utun7: flags=8051<UP,POINTOPOINT,RUNNING,MULTICAST> mtu 1280
+	inet 100.82.1.2 --> 100.82.1.2 netmask 0xffffffff
+EOF
+
+  output="$(IFCONFIG_LIST="lo0 utun7" run_install_env "$workspace")"
+
+  grep -Fq "Repairing missing $workspace/pf.anchors/tailscale" <<<"$output" || \
+    fail "Expected install to report repair of the missing managed anchor"
+  [[ -f "$workspace/pf.anchors/tailscale" ]] || fail "Expected install to recreate the missing anchor file"
+  assert_file_contains "$workspace/pf.anchors/tailscale" "pass out quick on utun7 inet from any to 100.64.0.0/10 no state"
+  pass "install accepts PF optimizer rule order and repairs a missing managed anchor"
 }
 
 test_install_rolls_back_failed_pf_reload() {
@@ -1419,6 +1456,7 @@ EOF
 
 test_install_detects_interface_and_writes_anchor
 test_install_repairs_partial_anchor_block
+test_install_repairs_missing_anchor_and_accepts_pf_optimizer_order
 test_install_rolls_back_failed_pf_reload
 test_install_preserves_live_mullvad_anchor_during_reload
 test_install_rolls_back_if_mullvad_changes_after_reload
