@@ -19,7 +19,7 @@ LAUNCHCTL_BIN="${LAUNCHCTL_BIN:-launchctl}"
 PLUTIL_BIN="${PLUTIL_BIN:-plutil}"
 CHOWN_BIN="${CHOWN_BIN:-chown}"
 CHMOD_BIN="${CHMOD_BIN:-chmod}"
-STAT_BIN="${STAT_BIN:-stat}"
+STAT_BIN="${STAT_BIN:-/usr/bin/stat}"
 CP_BIN="${CP_BIN:-cp}"
 RM_BIN="${RM_BIN:-rm}"
 CMP_BIN="${CMP_BIN:-cmp}"
@@ -445,6 +445,7 @@ install_root_owned_file() {
 
   "$CP_BIN" "$source_file" "$destination_file"
   "$CHOWN_BIN" root:wheel "$destination_file"
+  "$CHMOD_BIN" -N "$destination_file"
   "$CHMOD_BIN" "$file_mode" "$destination_file"
 }
 
@@ -554,6 +555,20 @@ tailscale_main_anchor_call_is_safe() {
   fi
 }
 
+file_owner_and_mode() {
+  local file="$1"
+
+  "$STAT_BIN" -L -f '%u %Lp' "$file" 2>/dev/null
+}
+
+file_has_no_extended_acl() {
+  local file="$1"
+  local acl_listing
+
+  acl_listing="$(/bin/ls -lde "$file" 2>/dev/null)" || return 1
+  ! grep -Eq '^[[:space:]]*[0-9]+:' <<<"$acl_listing"
+}
+
 file_is_root_owned_and_not_writable() {
   local file="$1"
   local metadata
@@ -561,11 +576,13 @@ file_is_root_owned_and_not_writable() {
   local mode
   local numeric_mode
 
-  metadata="$("$STAT_BIN" -f '%u %Lp' "$file" 2>/dev/null)" || return 1
+  [[ -f "$file" && ! -L "$file" ]] || return 1
+  metadata="$(file_owner_and_mode "$file")" || return 1
   read -r owner mode <<<"$metadata"
   [[ "$owner" == "0" && "$mode" =~ ^[0-7]{3,4}$ ]] || return 1
   numeric_mode=$((8#$mode))
-  (( (numeric_mode & 022) == 0 ))
+  (( (numeric_mode & 022) == 0 )) || return 1
+  file_has_no_extended_acl "$file"
 }
 
 plist_uses_program() {
