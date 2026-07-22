@@ -1006,11 +1006,11 @@ EOF
   grep -Fq "target owner UID 0, mode 664; expected a non-symlink with UID 0, no ACL, and no group/other write bits" <<<"$output" || \
     fail "Expected unsafe anchor permissions to include the observed UID and mode"
 
-  chmod +a "everyone allow write" "$workspace/pf.anchors/tailscale"
+  /bin/chmod +a "everyone allow write" "$workspace/pf.anchors/tailscale"
   output="$(IFCONFIG_LIST="lo0 utun7" STAT_OUTPUT="0 644" run_verify_env "$workspace" 2>&1 || true)"
   grep -Fq "$workspace/pf.anchors/tailscale is not a safe regular file" <<<"$output" || \
     fail "Expected an ACL write grant to fail anchor permission verification"
-  chmod -N "$workspace/pf.anchors/tailscale"
+  /bin/chmod -N "$workspace/pf.anchors/tailscale"
 
   mv "$workspace/pf.anchors/tailscale" "$workspace/pf.anchors/tailscale-target"
   ln -s "$workspace/pf.anchors/tailscale-target" "$workspace/pf.anchors/tailscale"
@@ -1029,6 +1029,50 @@ EOF
     fail "Expected disabled lockdown mode to explain the documented requirement"
 
   pass "verify reports actionable permission and lockdown diagnostics"
+}
+
+test_common_uses_native_macos_chmod() {
+  local workspace
+  local shadow_dir
+  local output
+  workspace="$(new_workspace native-chmod)"
+  shadow_dir="$workspace/path-shadow"
+  mkdir -p "$shadow_dir"
+
+  cat > "$shadow_dir/chmod" <<'EOF'
+#!/bin/bash
+if [[ "${1:-}" == "-N" ]]; then
+  echo "chmod: invalid option -- 'N'" >&2
+  exit 1
+fi
+exec /bin/chmod "$@"
+EOF
+  /bin/chmod +x "$shadow_dir/chmod"
+  printf '%s\n' "managed content" > "$workspace/source"
+  printf '%s\n' "stale content" > "$workspace/destination"
+  /bin/chmod 600 "$workspace/destination"
+  /bin/chmod +a "everyone allow write" "$workspace/destination"
+
+  if ! output="$(
+    PATH="$shadow_dir:$PATH" \
+    SCRIPT_DIR="$ROOT_DIR" \
+    CHOWN_BIN="$workspace/bin/chown" \
+    CP_BIN=/bin/cp \
+    bash -c 'set -euo pipefail; unset CHMOD_BIN; source "$SCRIPT_DIR/lib/common.sh"; install_root_owned_file "$1" "$2"' \
+      _ "$workspace/source" "$workspace/destination" 2>&1
+  )"; then
+    fail "Expected installs to use native macOS chmod despite a PATH shadow; got: $output"
+  fi
+
+  cmp -s "$workspace/source" "$workspace/destination" || \
+    fail "Expected the managed file content to be installed"
+  if /bin/ls -lde "$workspace/destination" | grep -Eq '^[[:space:]]*[0-9]+:'; then
+    fail "Expected native macOS chmod to remove the destination ACL"
+  fi
+  [[ "$(/usr/bin/stat -f '%Lp' "$workspace/destination")" == "644" ]] || \
+    fail "Expected the managed file mode to be 644"
+
+  pass "shared installs use native macOS chmod and remove inherited ACLs"
 }
 
 test_verify_followups_only_suggest_resolver_for_tailnet_domains() {
@@ -1760,6 +1804,7 @@ test_verify_rejects_missing_system_resolution
 test_verify_warns_on_hosts_override
 test_verify_accepts_externally_managed_tailscaled
 test_verify_reports_permission_metadata_and_lockdown_profile
+test_common_uses_native_macos_chmod
 test_verify_followups_only_suggest_resolver_for_tailnet_domains
 test_verify_warns_when_tailnet_resolver_override_is_missing
 test_verify_warns_on_mullvad_content_blocker_dns
