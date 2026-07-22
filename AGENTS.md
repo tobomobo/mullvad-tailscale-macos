@@ -10,6 +10,7 @@ If you are an agent making changes here, optimize for safety first. This repo mo
 - Detect the active Tailscale `utun` interface dynamically instead of assuming `utun0`.
 - Manage an optional `tailscaled` LaunchDaemon through code, not copy-pasted plist snippets.
 - Manage an optional tailnet-scoped `/etc/resolver/<tailnet>.ts.net` override through code when Mullvad breaks MagicDNS for normal macOS apps.
+- Manage an optional per-user userspace SOCKS5 transport through one explicit tailnet exit node without changing PF or the primary Tailscale client.
 - Verify both configuration state and optional live connectivity checks.
 
 ## Files That Matter
@@ -22,6 +23,8 @@ If you are an agent making changes here, optimize for safety first. This repo mo
   Verifies exact `pf.conf` lines, interface targeting, daemon state, and optional active checks.
 - `lib/common.sh`
   Shared source of truth for interface detection, exact-line matching, rollback behavior, and LaunchDaemon helpers.
+- `lib/exit-node-proxy.sh`
+  Isolated source of truth for the optional per-user proxy's private state, dedicated LocalAPI socket, LaunchAgent, and readiness checks.
 - `install-tailscaled-daemon.sh`
   Installs the managed LaunchDaemon using `launchctl bootstrap`.
 - `uninstall-tailscaled-daemon.sh`
@@ -36,6 +39,12 @@ If you are an agent making changes here, optimize for safety first. This repo mo
   Installs an optional domain-scoped MagicDNS resolver override for a tailnet.
 - `uninstall-tailnet-resolver.sh`
   Removes the optional resolver override.
+- `install-exit-node-proxy.sh`
+  Installs the optional per-user userspace Tailscale node and exposes SOCKS5 only after one explicit exit node is initially online.
+- `verify-exit-node-proxy.sh`
+  Checks the private node, stable exit-node identity, loopback listener, and optional public egress.
+- `uninstall-exit-node-proxy.sh`
+  Logs out and removes only the marked per-user proxy state and LaunchAgent.
 - `etc/pf.anchors/tailscale`
   Template, not a fixed installed anchor.
 - `tests/run.sh`
@@ -58,6 +67,8 @@ If you are an agent making changes here, optimize for safety first. This repo mo
 - Validate staged `pf.conf` content before reloading PF.
 - Restore the original `pf.conf` automatically if `pfctl -f` fails.
 - Treat active leak/connectivity checks as verification, not as proof of universal safety.
+- Route every optional proxy `tailscale` command through its dedicated LocalAPI socket; never let it mutate the primary client.
+- Do not describe the optional proxy as exit-node fail-closed: userspace dialing can fall back to ordinary Mullvad egress.
 - Keep direct MagicDNS checks separate from macOS system-resolver checks; `/etc/hosts`, `dscacheutil`, and resolver precedence can make them disagree.
 - If you manage resolver overrides, keep them domain-scoped in `/etc/resolver/<tailnet>.ts.net` for real tailnet domains ending in `.ts.net`; do not add per-host `/etc/hosts` hacks to the repo workflow.
 - Keep docs honest: say "should" or "expected to" unless the code actually proves it.
@@ -94,6 +105,10 @@ bash -n install-pf-watcher.sh
 bash -n uninstall-pf-watcher.sh
 bash -n refresh-anchor.sh
 bash -n lib/common.sh
+bash -n install-exit-node-proxy.sh
+bash -n verify-exit-node-proxy.sh
+bash -n uninstall-exit-node-proxy.sh
+bash -n lib/exit-node-proxy.sh
 bash tests/run.sh
 ```
 

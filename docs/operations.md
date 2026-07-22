@@ -49,6 +49,9 @@ sudo bash uninstall.sh
 | `uninstall-tailscaled-daemon.sh` | Remove only the repo-managed `tailscaled` LaunchDaemon |
 | `install-tailnet-resolver.sh` | Optionally route one `*.ts.net` tailnet domain to MagicDNS |
 | `uninstall-tailnet-resolver.sh` | Remove one repo-managed tailnet resolver override |
+| `install-exit-node-proxy.sh` | Install an experimental per-user SOCKS5 transport through one explicit tailnet exit node |
+| `verify-exit-node-proxy.sh` | Verify the private node, selected exit, loopback listener, and optional public egress |
+| `uninstall-exit-node-proxy.sh` | Log out and remove the repo-managed per-user proxy node |
 
 Run `bash <script> --help` for its exact options.
 
@@ -119,6 +122,40 @@ sudo bash uninstall-tailscaled-daemon.sh
 ```
 
 The uninstaller refuses to remove an unmarked service or executable.
+
+## Experimental Per-User Exit-Node Proxy
+
+Install this only when an application has native SOCKS5 support and should use an exit node already advertised and approved in your tailnet:
+
+```bash
+bash install-exit-node-proxy.sh --exit-node <advertised-node>
+bash verify-exit-node-proxy.sh
+```
+
+Run these commands as the logged-in user, without `sudo`. The installer requires Mullvad to report both connected and Lockdown enabled. It creates a marked LaunchAgent with a private state directory, a dedicated LocalAPI socket, and a second Tailscale identity. It does not change the default PF installation, the primary Tailscale client, Mullvad's split-tunnel list, or the macOS system proxy.
+
+The setup is intentionally two-phase. It first starts the private `tailscaled` instance without a listener, authenticates it, selects one explicit exit node, and checks that the backend is running and that exit node is online. Only then does it restart with a literal IPv4 loopback SOCKS5 listener. The configuration stores Tailscale's stable exit-node ID so later verification detects an unexpected selection.
+
+Configure a supporting application with:
+
+```text
+SOCKS5 host: 127.0.0.1
+SOCKS5 port: 1055
+```
+
+Prefer a `socks5h://` URL or the application's equivalent "proxy DNS" option. Plain `socks5://` can resolve hostnames outside the proxy. UDP, QUIC, WebRTC, helper processes, and application-specific DNS may not follow a SOCKS setting, so verify the actual application rather than assuming all of its traffic is covered.
+
+The listener is unauthenticated. Binding it to `127.0.0.1` prevents remote-network access, but every local macOS account that can connect to that loopback port can use it. Choose a different unprivileged port with `--port` if 1055 is already occupied.
+
+This component is not exit-node fail-closed. Tailscale's userspace dialer may use ordinary system egress if the selected exit route disappears after startup. Requiring Mullvad plus Lockdown makes that fallback ordinary Mullvad egress, but it does not preserve the selected exit-node location. Re-run the verifier after network, Tailscale, Mullvad, or exit-node changes.
+
+Remove the component without touching PF:
+
+```bash
+bash uninstall-exit-node-proxy.sh
+```
+
+The uninstaller logs out the dedicated identity when its private LocalAPI is reachable, unloads the marked LaunchAgent, and removes only the marked private state. If logout cannot complete, remove the stale device from the Tailscale admin console.
 
 ## Optional Tailnet Resolver
 

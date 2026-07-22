@@ -188,12 +188,12 @@ else
 fi
 
 echo "5. Daemon state"
-tailscaled_running=0
-if "$PGREP_BIN" -q tailscaled 2>/dev/null; then
-  tailscaled_running=1
-  pass "tailscaled is running"
+primary_tailscale_responsive=0
+if "$TAILSCALE_BIN" status --peers=false >/dev/null 2>&1; then
+  primary_tailscale_responsive=1
+  pass "The primary Tailscale LocalAPI responds on its default socket"
 else
-  warn "tailscaled is not running"
+  warn "The primary Tailscale LocalAPI does not respond on its default socket"
 fi
 
 if "$PGREP_BIN" -qf "mullvad-daemon" 2>/dev/null; then
@@ -247,7 +247,7 @@ if [[ -f "$TAILSCALED_DAEMON_PLIST" ]]; then
       warn "The unmarked tailscaled LaunchDaemon is not loaded (inspect it before adopting it with install-tailscaled-daemon.sh --replace-existing)"
     fi
   fi
-elif [[ "$tailscaled_running" -eq 1 ]]; then
+elif [[ "$primary_tailscale_responsive" -eq 1 ]]; then
   pass "No repo-managed tailscaled LaunchDaemon plist found; tailscaled appears to be managed elsewhere"
 else
   warn "Managed tailscaled LaunchDaemon plist not found"

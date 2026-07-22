@@ -203,6 +203,9 @@ if [[ "${1:-}" == "kickstart" ]]; then
 fi
 
 if [[ "${1:-}" == "bootout" ]]; then
+  if [[ "${LAUNCHCTL_BOOTOUT_EXIT:-0}" != "0" ]]; then
+    exit "$LAUNCHCTL_BOOTOUT_EXIT"
+  fi
   if [[ -f "$TEST_LOG_DIR/launchctl.loaded" ]]; then
     grep -Fvx -- "${2:-}" "$TEST_LOG_DIR/launchctl.loaded" > "$TEST_LOG_DIR/launchctl.loaded.tmp" || true
     mv "$TEST_LOG_DIR/launchctl.loaded.tmp" "$TEST_LOG_DIR/launchctl.loaded"
@@ -230,7 +233,11 @@ EOF
 
   cat > "$bin_dir/curl" <<'EOF'
 #!/bin/bash
-printf '%s\n' "${CURL_OUTPUT:-}"
+if [[ " $* " == *" --proxy "* ]]; then
+  printf '%s\n' "${CURL_PROXY_OUTPUT:-${CURL_OUTPUT:-}}"
+else
+  printf '%s\n' "${CURL_OUTPUT:-}"
+fi
 exit "${CURL_EXIT:-0}"
 EOF
 
@@ -261,6 +268,12 @@ EOF
 
   cat > "$bin_dir/tailscale" <<'EOF'
 #!/bin/bash
+printf '%s\n' "$*" >> "$TEST_LOG_DIR/tailscale.calls"
+
+if [[ "${1:-}" == --socket=* ]]; then
+  shift
+fi
+
 if [[ "${1:-}" == "ip" && "${2:-}" == "-4" ]]; then
   printf '%s\n' "${TAILSCALE_IPV4:-100.82.1.2}"
   exit "${TAILSCALE_IP_EXIT:-0}"
@@ -281,7 +294,35 @@ if [[ "${1:-}" == "ping" ]]; then
   exit "${TAILSCALE_DISCO_EXIT:-0}"
 fi
 
+if [[ "${1:-}" == "status" ]]; then
+  if [[ " $* " == *" --json "* ]]; then
+    status_count="$(grep -Ec ' status --json$' "$TEST_LOG_DIR/tailscale.calls" || true)"
+    if [[ -n "${TAILSCALE_STATUS_JSON_AFTER+x}" && "$status_count" -ge "${TAILSCALE_STATUS_JSON_SWITCH_CALL:-3}" ]]; then
+      printf '%s\n' "$TAILSCALE_STATUS_JSON_AFTER"
+    elif [[ -n "${TAILSCALE_STATUS_JSON+x}" ]]; then
+      printf '%s\n' "$TAILSCALE_STATUS_JSON"
+    else
+      printf '%s\n' '{"BackendState":"Running","TUN":false,"ExitNodeStatus":{"ID":"n-exit-test","Online":true},"Self":{"Expired":false}}'
+    fi
+  fi
+  exit "${TAILSCALE_STATUS_EXIT:-0}"
+fi
+
+if [[ "${1:-}" == "up" ]]; then
+  exit "${TAILSCALE_UP_EXIT:-0}"
+fi
+
+if [[ "${1:-}" == "logout" ]]; then
+  exit "${TAILSCALE_LOGOUT_EXIT:-0}"
+fi
+
 exit 0
+EOF
+
+  cat > "$bin_dir/lsof" <<'EOF'
+#!/bin/bash
+printf '%s\n' "${LSOF_OUTPUT:-}"
+exit "${LSOF_EXIT:-0}"
 EOF
 
   cat > "$bin_dir/mullvad" <<'EOF'
@@ -402,6 +443,74 @@ run_daemon_uninstall_env() {
   bash "$ROOT_DIR/uninstall-tailscaled-daemon.sh" "$@"
 }
 
+run_exit_proxy_install_env() {
+  local workspace="$1"
+  shift
+
+  local bin_dir="$workspace/bin"
+  TEST_LOG_DIR="$workspace/logs" \
+  SKIP_USER_CHECK=1 \
+  SKIP_SOCKET_LENGTH_CHECK=1 \
+  EXIT_NODE_PROXY_STATE_DIR="$workspace/exit-node-proxy" \
+  EXIT_NODE_PROXY_PLIST="$workspace/LaunchAgents/com.mullvad-tailscale-macos.exit-node-proxy.plist" \
+  EXIT_NODE_PROXY_SOCKET="$workspace/exit-node-proxy/tailscaled.sock" \
+  EXIT_NODE_PROXY_STATE_FILE="$workspace/exit-node-proxy/tailscaled.state" \
+  EXIT_NODE_PROXY_CONFIG="$workspace/exit-node-proxy/config" \
+  EXIT_NODE_PROXY_MARKER="$workspace/exit-node-proxy/.managed-by-mullvad-tailscale-macos" \
+  TAILSCALED_BIN="$workspace/source-tailscaled" \
+  TAILSCALE_BIN="$bin_dir/tailscale" \
+  MULLVAD_BIN="$bin_dir/mullvad" \
+  LAUNCHCTL_BIN="$bin_dir/launchctl" \
+  PLUTIL_BIN="/usr/bin/plutil" \
+  CHMOD_BIN="/bin/chmod" \
+  SLEEP_BIN="true" \
+  bash "$ROOT_DIR/install-exit-node-proxy.sh" "$@"
+}
+
+run_exit_proxy_verify_env() {
+  local workspace="$1"
+  shift
+
+  local bin_dir="$workspace/bin"
+  TEST_LOG_DIR="$workspace/logs" \
+  SKIP_USER_CHECK=1 \
+  SKIP_SOCKET_LENGTH_CHECK=1 \
+  EXIT_NODE_PROXY_STATE_DIR="$workspace/exit-node-proxy" \
+  EXIT_NODE_PROXY_PLIST="$workspace/LaunchAgents/com.mullvad-tailscale-macos.exit-node-proxy.plist" \
+  EXIT_NODE_PROXY_SOCKET="$workspace/exit-node-proxy/tailscaled.sock" \
+  EXIT_NODE_PROXY_STATE_FILE="$workspace/exit-node-proxy/tailscaled.state" \
+  EXIT_NODE_PROXY_CONFIG="$workspace/exit-node-proxy/config" \
+  EXIT_NODE_PROXY_MARKER="$workspace/exit-node-proxy/.managed-by-mullvad-tailscale-macos" \
+  TAILSCALE_BIN="$bin_dir/tailscale" \
+  MULLVAD_BIN="$bin_dir/mullvad" \
+  LAUNCHCTL_BIN="$bin_dir/launchctl" \
+  PLUTIL_BIN="/usr/bin/plutil" \
+  CURL_BIN="$bin_dir/curl" \
+  LSOF_BIN="$bin_dir/lsof" \
+  STAT_BIN="/usr/bin/stat" \
+  LS_BIN="/bin/ls" \
+  bash "$ROOT_DIR/verify-exit-node-proxy.sh" "$@"
+}
+
+run_exit_proxy_uninstall_env() {
+  local workspace="$1"
+  shift
+
+  local bin_dir="$workspace/bin"
+  TEST_LOG_DIR="$workspace/logs" \
+  SKIP_USER_CHECK=1 \
+  SKIP_SOCKET_LENGTH_CHECK=1 \
+  EXIT_NODE_PROXY_STATE_DIR="$workspace/exit-node-proxy" \
+  EXIT_NODE_PROXY_PLIST="$workspace/LaunchAgents/com.mullvad-tailscale-macos.exit-node-proxy.plist" \
+  EXIT_NODE_PROXY_SOCKET="$workspace/exit-node-proxy/tailscaled.sock" \
+  EXIT_NODE_PROXY_STATE_FILE="$workspace/exit-node-proxy/tailscaled.state" \
+  EXIT_NODE_PROXY_CONFIG="$workspace/exit-node-proxy/config" \
+  EXIT_NODE_PROXY_MARKER="$workspace/exit-node-proxy/.managed-by-mullvad-tailscale-macos" \
+  TAILSCALE_BIN="$bin_dir/tailscale" \
+  LAUNCHCTL_BIN="$bin_dir/launchctl" \
+  bash "$ROOT_DIR/uninstall-exit-node-proxy.sh" "$@"
+}
+
 run_resolver_install_env() {
   local workspace="$1"
   shift
@@ -494,6 +603,7 @@ new_workspace() {
   : > "$workspace/logs/launchctl.loaded"
   : > "$workspace/logs/dscacheutil.calls"
   : > "$workspace/logs/killall.calls"
+  : > "$workspace/logs/tailscale.calls"
   : > "$workspace/hosts"
   printf '#!/bin/bash\nexit 0\n' > "$workspace/source-tailscaled"
   chmod +x "$workspace/source-tailscaled"
@@ -965,7 +1075,7 @@ EOF
 
   output="$(
     IFCONFIG_LIST="lo0 utun7" \
-    PGREP_TAILSCALED_EXIT=0 \
+    TAILSCALE_STATUS_EXIT=0 \
     PGREP_MULLVAD_EXIT=0 \
     CURL_OUTPUT="You are connected to Mullvad" \
     run_verify_env "$workspace"
@@ -974,6 +1084,45 @@ EOF
   grep -Fq "tailscaled appears to be managed elsewhere" <<<"$output" || fail "Expected verify to accept externally managed tailscaled"
   assert_file_not_contains <(printf '%s' "$output") "Managed tailscaled LaunchDaemon plist not found"
   pass "verify accepts tailscaled managed outside the repo"
+}
+
+test_verify_does_not_mistake_proxy_daemon_for_primary_tailscale() {
+  local workspace
+  local output
+  workspace="$(new_workspace verify-primary-socket)"
+
+  cat > "$workspace/pf.conf" <<EOF
+set skip on lo0
+anchor "tailscale"
+load anchor "tailscale" from "$workspace/pf.anchors/tailscale"
+EOF
+
+  cat > "$workspace/pf.anchors/tailscale" <<'EOF'
+pass out quick on utun7 inet from any to 100.64.0.0/10 no state
+pass in quick on utun7 inet from 100.64.0.0/10 to any no state
+pass out quick on utun7 inet6 from any to fd7a:115c:a1e0::/48 no state
+pass in quick on utun7 inet6 from fd7a:115c:a1e0::/48 to any no state
+EOF
+
+  cat > "$workspace/ifconfig/utun7" <<'EOF'
+utun7: flags=8051<UP,POINTOPOINT,RUNNING,MULTICAST> mtu 1280
+	inet 100.82.1.2 --> 100.82.1.2 netmask 0xffffffff
+EOF
+
+  output="$(
+    IFCONFIG_LIST="lo0 utun7" \
+    TAILSCALE_STATUS_EXIT=1 \
+    PGREP_TAILSCALED_EXIT=0 \
+    PGREP_MULLVAD_EXIT=0 \
+    CURL_OUTPUT="You are connected to Mullvad" \
+    run_verify_env "$workspace" 2>&1 || true
+  )"
+
+  grep -Fq "primary Tailscale LocalAPI does not respond" <<<"$output" || fail "Expected the verifier to require the primary LocalAPI"
+  if grep -Fq "tailscaled appears to be managed elsewhere" <<<"$output"; then
+    fail "A secondary tailscaled process must not satisfy primary Tailscale verification"
+  fi
+  pass "verify distinguishes the primary Tailscale LocalAPI from a secondary proxy daemon"
 }
 
 test_verify_reports_permission_metadata_and_lockdown_profile() {
@@ -1354,6 +1503,144 @@ test_daemon_uninstaller_boots_out_and_removes_plist() {
   [[ ! -f "$workspace/com.tailscale.tailscaled.plist" ]] || fail "Expected LaunchDaemon plist to be removed"
   [[ ! -f "$workspace/managed-tailscaled" ]] || fail "Expected managed tailscaled binary to be removed"
   pass "daemon uninstaller unloads and removes only marked daemon artifacts"
+}
+
+test_exit_proxy_installer_uses_dedicated_socket_and_safe_flags() {
+  local workspace
+  workspace="$(new_workspace exit-proxy-install)"
+
+  run_exit_proxy_install_env "$workspace" --exit-node office-exit --port 12055 >/dev/null
+
+  assert_file_contains "$workspace/LaunchAgents/com.mullvad-tailscale-macos.exit-node-proxy.plist" "<!-- Managed by mullvad-tailscale-macos exit-node-proxy -->"
+  assert_file_contains "$workspace/LaunchAgents/com.mullvad-tailscale-macos.exit-node-proxy.plist" "--tun=userspace-networking"
+  assert_file_contains "$workspace/LaunchAgents/com.mullvad-tailscale-macos.exit-node-proxy.plist" "--socks5-server=127.0.0.1:12055"
+  assert_file_contains "$workspace/LaunchAgents/com.mullvad-tailscale-macos.exit-node-proxy.plist" "--no-logs-no-support"
+  assert_file_contains "$workspace/exit-node-proxy/config" "requested_exit_node=office-exit"
+  assert_file_contains "$workspace/exit-node-proxy/config" "stable_exit_node_id=n-exit-test"
+  [[ "$(/usr/bin/stat -f '%Lp' "$workspace/exit-node-proxy")" == "700" ]] || fail "Expected private exit-proxy state mode 700"
+  [[ -z "$(/bin/ls -lde "$workspace/exit-node-proxy" | sed -n '/^[[:space:]][0-9][0-9]*:/p')" ]] || fail "Expected private exit-proxy state without ACL entries"
+
+  assert_file_contains "$workspace/logs/tailscale.calls" "--socket=$workspace/exit-node-proxy/tailscaled.sock up --reset"
+  assert_file_contains "$workspace/logs/tailscale.calls" "--accept-dns=true"
+  assert_file_contains "$workspace/logs/tailscale.calls" "--accept-routes=false"
+  assert_file_contains "$workspace/logs/tailscale.calls" "--advertise-exit-node=false"
+  assert_file_contains "$workspace/logs/tailscale.calls" "--exit-node=office-exit"
+  assert_file_contains "$workspace/logs/tailscale.calls" "--exit-node-allow-lan-access=false"
+  assert_file_contains "$workspace/logs/tailscale.calls" "--shields-up=true"
+  if awk 'NF && $0 !~ /^--socket=.* (status|up|logout)( |$)/ { bad=1 } END { exit bad }' "$workspace/logs/tailscale.calls"; then
+    :
+  else
+    fail "Every exit-proxy Tailscale command must use the dedicated socket"
+  fi
+  pass "exit proxy installs a private userspace node with an explicit exit node and dedicated LocalAPI socket"
+}
+
+test_exit_proxy_installer_requires_mullvad_lockdown() {
+  local workspace
+  workspace="$(new_workspace exit-proxy-lockdown)"
+
+  MULLVAD_LOCKDOWN="Block traffic when VPN is disconnected: off" \
+    run_exit_proxy_install_env "$workspace" --exit-node office-exit >/dev/null 2>&1 && \
+    fail "exit proxy installer should require Mullvad Lockdown"
+
+  [[ ! -e "$workspace/LaunchAgents/com.mullvad-tailscale-macos.exit-node-proxy.plist" ]] || fail "Lockdown failure must happen before installing the LaunchAgent"
+  pass "exit proxy installer refuses to run without Mullvad Lockdown"
+}
+
+test_exit_proxy_keeps_listener_disabled_when_exit_is_offline() {
+  local workspace
+  workspace="$(new_workspace exit-proxy-offline)"
+
+  TAILSCALE_STATUS_JSON='{"BackendState":"Running","TUN":false,"ExitNodeStatus":{"ID":"n-exit-test","Online":false},"Self":{"Expired":false}}' \
+    run_exit_proxy_install_env "$workspace" --exit-node office-exit --port 12055 >/dev/null 2>&1 && \
+    fail "exit proxy installer should reject an offline exit node"
+
+  [[ -f "$workspace/LaunchAgents/com.mullvad-tailscale-macos.exit-node-proxy.plist" ]] || fail "Expected the safe no-listener LaunchAgent to remain installed"
+  assert_file_not_contains "$workspace/LaunchAgents/com.mullvad-tailscale-macos.exit-node-proxy.plist" "--socks5-server="
+  pass "exit proxy keeps SOCKS disabled when the selected exit node is not online"
+}
+
+test_exit_proxy_restores_safe_plist_if_exit_is_lost_during_restart() {
+  local workspace
+  workspace="$(new_workspace exit-proxy-restart-offline)"
+
+  TAILSCALE_STATUS_JSON_AFTER='{"BackendState":"Running","TUN":false,"ExitNodeStatus":{"ID":"n-exit-test","Online":false},"Self":{"Expired":false}}' \
+    TAILSCALE_STATUS_JSON_SWITCH_CALL=3 \
+    run_exit_proxy_install_env "$workspace" --exit-node office-exit --port 12055 >/dev/null 2>&1 && \
+    fail "exit proxy installer should reject an exit node lost during listener restart"
+
+  [[ -f "$workspace/LaunchAgents/com.mullvad-tailscale-macos.exit-node-proxy.plist" ]] || fail "Expected the safe no-listener LaunchAgent to be restored"
+  assert_file_not_contains "$workspace/LaunchAgents/com.mullvad-tailscale-macos.exit-node-proxy.plist" "--socks5-server="
+  pass "exit proxy restores its no-listener LaunchAgent if exit readiness is lost during restart"
+}
+
+test_exit_proxy_scripts_refuse_unmarked_state() {
+  local workspace
+  workspace="$(new_workspace exit-proxy-unmarked)"
+  mkdir -p "$workspace/exit-node-proxy"
+  printf '%s\n' "foreign state" > "$workspace/exit-node-proxy/foreign"
+
+  run_exit_proxy_install_env "$workspace" --exit-node office-exit >/dev/null 2>&1 && fail "installer should refuse unmarked state"
+  run_exit_proxy_uninstall_env "$workspace" >/dev/null 2>&1 && fail "uninstaller should refuse unmarked state"
+  assert_file_contains "$workspace/exit-node-proxy/foreign" "foreign state"
+  pass "exit proxy scripts refuse to overwrite or remove unmarked state"
+}
+
+test_exit_proxy_installer_refuses_symlinked_state_file() {
+  local workspace
+  workspace="$(new_workspace exit-proxy-state-symlink)"
+  mkdir -p "$workspace/exit-node-proxy"
+  printf '%s\n' "Managed by mullvad-tailscale-macos exit-node-proxy" > "$workspace/exit-node-proxy/.managed-by-mullvad-tailscale-macos"
+  printf '%s\n' "do not overwrite" > "$workspace/foreign-state"
+  ln -s "$workspace/foreign-state" "$workspace/exit-node-proxy/tailscaled.state"
+
+  run_exit_proxy_install_env "$workspace" --exit-node office-exit >/dev/null 2>&1 && fail "installer should refuse a symlinked Tailscale state file"
+
+  assert_file_contains "$workspace/foreign-state" "do not overwrite"
+  [[ ! -e "$workspace/LaunchAgents/com.mullvad-tailscale-macos.exit-node-proxy.plist" ]] || fail "State symlink failure must happen before installing the LaunchAgent"
+  pass "exit proxy installer refuses a symlinked private Tailscale state file"
+}
+
+test_exit_proxy_verifier_checks_private_instance() {
+  local workspace
+  local output
+  workspace="$(new_workspace exit-proxy-verify)"
+
+  run_exit_proxy_install_env "$workspace" --exit-node office-exit --port 12055 >/dev/null
+  output="$(
+    LSOF_OUTPUT="tailscaled 123 test 5u IPv4 0x1 0t0 TCP 127.0.0.1:12055 (LISTEN)" \
+      run_exit_proxy_verify_env "$workspace" --no-active-check
+  )"
+
+  grep -Fq "0 failed" <<<"$output" || fail "Expected exit proxy verification to finish with zero failures"
+  grep -Fq "Selected exit node matches stored stable ID n-exit-test" <<<"$output" || fail "Expected stable exit-node verification"
+  pass "exit proxy verifier checks the private LocalAPI, online exit node, and loopback listener"
+}
+
+test_exit_proxy_uninstaller_logs_out_and_removes_managed_state() {
+  local workspace
+  workspace="$(new_workspace exit-proxy-uninstall)"
+
+  run_exit_proxy_install_env "$workspace" --exit-node office-exit >/dev/null
+  run_exit_proxy_uninstall_env "$workspace" >/dev/null
+
+  assert_file_contains "$workspace/logs/tailscale.calls" "--socket=$workspace/exit-node-proxy/tailscaled.sock logout"
+  [[ ! -e "$workspace/LaunchAgents/com.mullvad-tailscale-macos.exit-node-proxy.plist" ]] || fail "Expected managed exit-proxy LaunchAgent removal"
+  [[ ! -e "$workspace/exit-node-proxy" ]] || fail "Expected managed exit-proxy state removal"
+  pass "exit proxy uninstaller logs out the dedicated node and removes only managed artifacts"
+}
+
+test_exit_proxy_uninstaller_preserves_state_when_bootout_fails() {
+  local workspace
+  workspace="$(new_workspace exit-proxy-uninstall-bootout-failure)"
+
+  run_exit_proxy_install_env "$workspace" --exit-node office-exit >/dev/null
+  LAUNCHCTL_BOOTOUT_EXIT=1 run_exit_proxy_uninstall_env "$workspace" >/dev/null 2>&1 && \
+    fail "exit proxy uninstaller should fail when launchctl cannot unload the job"
+
+  [[ -f "$workspace/LaunchAgents/com.mullvad-tailscale-macos.exit-node-proxy.plist" ]] || fail "LaunchAgent plist must remain after bootout failure"
+  [[ -d "$workspace/exit-node-proxy" ]] || fail "Private state must remain after bootout failure"
+  pass "exit proxy uninstaller preserves managed state when the LaunchAgent cannot be unloaded"
 }
 
 test_pf_watcher_installer_installs_payload_and_bootstraps() {
@@ -1803,6 +2090,7 @@ test_verify_rejects_system_resolver_mismatch
 test_verify_rejects_missing_system_resolution
 test_verify_warns_on_hosts_override
 test_verify_accepts_externally_managed_tailscaled
+test_verify_does_not_mistake_proxy_daemon_for_primary_tailscale
 test_verify_reports_permission_metadata_and_lockdown_profile
 test_common_uses_native_macos_chmod
 test_verify_followups_only_suggest_resolver_for_tailnet_domains
@@ -1819,6 +2107,15 @@ test_daemon_installer_bootstraps_launchdaemon
 test_daemon_installer_rejects_unloaded_job
 test_daemon_uninstaller_boots_out_and_removes_plist
 test_daemon_scripts_refuse_unmarked_plist
+test_exit_proxy_installer_uses_dedicated_socket_and_safe_flags
+test_exit_proxy_installer_requires_mullvad_lockdown
+test_exit_proxy_keeps_listener_disabled_when_exit_is_offline
+test_exit_proxy_restores_safe_plist_if_exit_is_lost_during_restart
+test_exit_proxy_scripts_refuse_unmarked_state
+test_exit_proxy_installer_refuses_symlinked_state_file
+test_exit_proxy_verifier_checks_private_instance
+test_exit_proxy_uninstaller_logs_out_and_removes_managed_state
+test_exit_proxy_uninstaller_preserves_state_when_bootout_fails
 test_pf_watcher_installer_installs_payload_and_bootstraps
 test_pf_watcher_uninstaller_boots_out_and_removes
 test_watcher_scripts_refuse_unrecognized_artifacts

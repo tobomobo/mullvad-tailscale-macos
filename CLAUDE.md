@@ -11,6 +11,8 @@ Read these first:
 3. The relevant file under `docs/` or `SECURITY.md`
 4. `lib/common.sh`
 
+For the optional exit-node proxy, also read `lib/exit-node-proxy.sh`; its state and LocalAPI socket must remain isolated from the primary Tailscale client.
+
 `AGENTS.md` contains the repo-wide invariants. Follow it unless the user explicitly asks for a different direction.
 
 ## What Success Looks Like
@@ -49,6 +51,10 @@ bash -n install-pf-watcher.sh
 bash -n uninstall-pf-watcher.sh
 bash -n refresh-anchor.sh
 bash -n lib/common.sh
+bash -n install-exit-node-proxy.sh
+bash -n verify-exit-node-proxy.sh
+bash -n uninstall-exit-node-proxy.sh
+bash -n lib/exit-node-proxy.sh
 ```
 
 Smoke tests:
@@ -64,6 +70,7 @@ bash tests/run.sh
 - detection of the active Tailscale `utun` interface
 - LaunchDaemon install and unload flows
 - optional `/etc/resolver/<tailnet>.ts.net` management
+- optional exit-node proxy isolation, loopback exposure, and fail-open wording
 - any security or DNS leak wording in the docs
 - any MagicDNS validation that forgets about `/etc/hosts`, `dscacheutil`, or resolver precedence
 
