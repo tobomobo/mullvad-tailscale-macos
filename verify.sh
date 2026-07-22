@@ -102,9 +102,14 @@ if [[ -f "$ANCHOR_FILE" ]]; then
       fail "$ANCHOR_FILE is unmarked or contains rules outside the exact managed policy"
     fi
     if file_is_root_owned_and_not_writable "$ANCHOR_FILE"; then
-      pass "Anchor file is root-owned and not writable by group or other users"
+      pass "Anchor file is a regular root-owned file with no ACL or group/other write access"
     else
-      fail "$ANCHOR_FILE is not safely owned or has unsafe write permissions"
+      anchor_metadata="$(file_owner_and_mode "$ANCHOR_FILE" || true)"
+      if [[ "$anchor_metadata" =~ ^([0-9]+)[[:space:]]+([0-7]{3,4})$ ]]; then
+        fail "$ANCHOR_FILE is not a safe regular file ($STAT_BIN reported target owner UID ${BASH_REMATCH[1]}, mode ${BASH_REMATCH[2]}; expected a non-symlink with UID 0, no ACL, and no group/other write bits)"
+      else
+        fail "$ANCHOR_FILE ownership and permissions could not be read with $STAT_BIN"
+      fi
     fi
   else
     fail "Unable to determine interface from $ANCHOR_FILE"
@@ -210,7 +215,7 @@ mullvad_lockdown_output="$(mullvad_lockdown_status 2>/dev/null || true)"
 if [[ -n "$mullvad_lockdown_output" ]] && mullvad_lockdown_is_enabled "$mullvad_lockdown_output"; then
   pass "Mullvad lockdown mode is enabled"
 elif [[ -n "$mullvad_lockdown_output" ]]; then
-  fail "Mullvad lockdown mode is not enabled (enable it with: mullvad lockdown-mode set on)"
+  fail "Mullvad lockdown mode is not enabled; this repository's documented configuration requires it (enable it with: mullvad lockdown-mode set on)"
 else
   fail "Unable to query Mullvad lockdown mode"
 fi

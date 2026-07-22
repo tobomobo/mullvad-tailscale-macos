@@ -94,7 +94,7 @@ validate_anchor_policy_file "$tmp_anchor" "$interface" || die "Rendered anchor f
 mullvad_pf_protection_is_consistent || die "Mullvad reports active protection, but its PF anchor is missing or empty. Refusing to attach the Tailscale exception."
 lockdown_status="$(mullvad_lockdown_status 2>/dev/null || true)"
 if [[ -n "$lockdown_status" ]] && ! mullvad_lockdown_is_enabled "$lockdown_status"; then
-  echo "Warning: Mullvad lockdown mode is not enabled; installation can continue, but verify.sh will fail until you run: mullvad lockdown-mode set on" >&2
+  echo "Warning: Mullvad lockdown mode is not enabled; installation can continue, but the repository's documented configuration requires it and verify.sh will fail until you run: mullvad lockdown-mode set on" >&2
 fi
 
 echo "Installing anchor rules for $interface to $ANCHOR_FILE ..."
