@@ -1,123 +1,76 @@
-# AGENTS.md
+# Agent Guide
 
-This repository exists to keep Tailscale working on macOS while Mullvad's PF-based kill switch is enabled.
+This is a narrowly maintained compatibility workaround for keeping Tailscale
+usable on macOS while Mullvad's PF-based kill switch is enabled. Keep it
+minimal: add behavior only for observed compatibility, safety, or reliability
+problems—not speculative expansion.
 
-If you are an agent making changes here, optimize for safety first. This repo modifies firewall configuration, can touch launchd state, and makes security-sensitive claims.
+Agents are expected to handle implementation, review, tests, and documentation.
+Human testing is welcome, especially for live macOS behavior.
 
-## Purpose
+## Start Here
 
-- Install a PF anchor that allows Tailscale's tailnet ranges through Mullvad's kill switch.
-- Detect the active Tailscale `utun` interface dynamically instead of assuming `utun0`.
-- Manage an optional `tailscaled` LaunchDaemon through code, not copy-pasted plist snippets.
-- Manage an optional tailnet-scoped `/etc/resolver/<tailnet>.ts.net` override through code when Mullvad breaks MagicDNS for normal macOS apps.
-- Verify both configuration state and optional live connectivity checks.
+Before changing code, read:
 
-## Files That Matter
+1. `README.md`
+2. The relevant guide in `docs/`
+3. `SECURITY.md` for firewall, DNS, privilege, or security-claim changes
+4. `lib/common.sh` and the script being changed
 
-- `install.sh`
-  Renders the anchor for the active interface, validates staged PF changes, and applies rollback-safe updates.
-- `uninstall.sh`
-  Removes the managed anchor block and installed anchor file safely.
-- `verify.sh`
-  Verifies exact `pf.conf` lines, interface targeting, daemon state, and optional active checks.
-- `lib/common.sh`
-  Shared source of truth for interface detection, exact-line matching, rollback behavior, and LaunchDaemon helpers.
-- `install-tailscaled-daemon.sh`
-  Installs the managed LaunchDaemon using `launchctl bootstrap`.
-- `uninstall-tailscaled-daemon.sh`
-  Removes the managed LaunchDaemon.
-- `install-pf-watcher.sh`
-  Installs a LaunchDaemon that reattaches the anchor to Tailscale's current interface on network changes, keeping the interface binding instead of widening the exception.
-- `uninstall-pf-watcher.sh`
-  Removes the pf-watcher LaunchDaemon and its installed payload.
-- `refresh-anchor.sh`
-  Reattaches the anchor for the active interface using the same validate/reload path as install; runnable manually and used by the watcher.
-- `install-tailnet-resolver.sh`
-  Installs an optional domain-scoped MagicDNS resolver override for a tailnet.
-- `uninstall-tailnet-resolver.sh`
-  Removes the optional resolver override.
-- `etc/pf.anchors/tailscale`
-  Template, not a fixed installed anchor.
-- `tests/run.sh`
-  Stubbed smoke tests for core safety and behavior.
-- `README.md`
-  Concise user entry point. Keep the default install and verify path easy to scan.
-- `docs/operations.md`
-  Component scripts, maintenance, optional services, and removal.
-- `docs/troubleshooting.md`
-  PF, launchd, DNS, MagicDNS, content-blocker, and DERP diagnosis.
-- `SECURITY.md`
-  Trust boundaries, PF transaction model, limitations, and security claims.
+Inspect repo-owned command definitions before running them.
+
+## Safety Boundaries
+
+- Ask before every live `sudo` command or operation that changes PF, launchd,
+  Mullvad, Tailscale, or `/etc/resolver`. Also follow the active coding
+  harness's approval and sandbox rules.
+- Never describe stubbed tests or point-in-time connectivity checks as a live
+  system security audit or universal proof of safety.
+- Keep security claims evidence-based. Prefer "should" or "expected to" unless
+  the code and executed checks establish something stronger.
 
 ## Non-Negotiable Invariants
 
-- Never hard-code `utun0` in new behavior.
-- Keep `--interface` override support whenever interface detection is relevant.
-- Use exact-line matching for the managed `pf.conf` block.
-- Validate rendered anchor files before installing them.
-- Validate staged `pf.conf` content before reloading PF.
-- Restore the original `pf.conf` automatically if `pfctl -f` fails.
-- Treat active leak/connectivity checks as verification, not as proof of universal safety.
-- Keep direct MagicDNS checks separate from macOS system-resolver checks; `/etc/hosts`, `dscacheutil`, and resolver precedence can make them disagree.
-- If you manage resolver overrides, keep them domain-scoped in `/etc/resolver/<tailnet>.ts.net` for real tailnet domains ending in `.ts.net`; do not add per-host `/etc/hosts` hacks to the repo workflow.
-- Keep docs honest: say "should" or "expected to" unless the code actually proves it.
-- If you change install, uninstall, verify, or shared helper behavior, update `tests/run.sh`.
+- Detect Tailscale's active `utun` dynamically; never hard-code `utun0`. Keep
+  `--interface` override support wherever detection matters.
+- Keep the PF exception limited to Tailscale's CGNAT and IPv6 ULA ranges on the
+  detected interface.
+- Match the managed `pf.conf` lines exactly.
+- Validate rendered anchors and staged `pf.conf` content before installation or
+  reload.
+- Preserve rollback: if `pfctl -f` or its post-check fails, restore the previous
+  file and runtime ruleset.
+- Keep the anchor workflow deterministic: detect, render, validate, stage,
+  validate, apply, and verify.
+- Keep LaunchDaemon management in repo scripts rather than ad hoc plist
+  instructions.
+- Keep direct MagicDNS checks separate from macOS system-resolver checks;
+  `/etc/hosts`, `dscacheutil`, and resolver precedence can make them disagree.
+- Keep resolver overrides domain-scoped under
+  `/etc/resolver/<tailnet>.ts.net`; do not make per-host `/etc/hosts` entries
+  part of the repo workflow.
 
-## Safe Workflow
+## Making Changes
 
-1. Read `README.md`, the relevant focused guide, `lib/common.sh`, and the script you plan to touch.
-2. Prefer changing shared behavior in `lib/common.sh` instead of duplicating logic.
-3. Keep the anchor-management path deterministic:
-   - detect interface
-   - render template
-   - validate render
-   - stage `pf.conf`
-   - validate staged `pf.conf`
-   - apply with rollback
-4. Keep LaunchDaemon management inside the repo scripts.
-5. Update docs when user-facing behavior changes.
-6. Run local checks before finishing.
+- Put behavior shared by multiple scripts in `lib/common.sh`.
+- Update `tests/run.sh` when install, uninstall, verification, or shared-helper
+  behavior changes.
+- Update the concise README path or focused guide when user-facing behavior
+  changes.
+- In reviews, prioritize correctness, regressions, security boundaries, and
+  documentation drift over style.
 
-## Required Checks Before You Finish
+## Quality Gates
 
-Run these after relevant changes:
+After code changes, run:
 
 ```bash
-bash -n install.sh
-bash -n uninstall.sh
-bash -n verify.sh
-bash -n install-tailscaled-daemon.sh
-bash -n uninstall-tailscaled-daemon.sh
-bash -n install-tailnet-resolver.sh
-bash -n uninstall-tailnet-resolver.sh
-bash -n install-pf-watcher.sh
-bash -n uninstall-pf-watcher.sh
-bash -n refresh-anchor.sh
-bash -n lib/common.sh
+bash -n ./*.sh ./lib/*.sh ./tests/*.sh
 bash tests/run.sh
 ```
 
-If you changed only docs, note that the smoke tests were not rerun if you choose to skip them.
+The smoke suite stubs system commands. It does not replace live macOS
+validation of PF, launchd, Mullvad, Tailscale, or DNS behavior.
 
-## Things To Avoid
-
-- Do not claim the repo has performed a live-system security audit unless one was actually done.
-- Do not introduce substring-based `grep tailscale` logic for managed `pf.conf` lines.
-- Do not add ad hoc plist instructions to the README if the repo can manage that flow in code.
-- Do not document per-host `/etc/hosts` entries as the preferred solution when a domain-scoped `/etc/resolver/<tailnet>.ts.net` override will do.
-- Do not remove rollback protection.
-- Do not silently broaden the PF exception beyond Tailscale's CGNAT and IPv6 ULA ranges.
-- Do not run destructive live PF or launchd changes on a user's machine without clear intent.
-
-## Review Checklist
-
-- Does the change preserve interface correctness when Tailscale is not `utun0`?
-- Does it keep `pf.conf` edits exact and reversible?
-- Does it preserve or improve test coverage?
-- Do the README and focused guides still match the actual scripts without duplicating unnecessary detail?
-- Does any DNS or MagicDNS check account for `/etc/hosts`, `dscacheutil`, and resolver precedence under Mullvad?
-- Are security statements precise and evidence-based?
-
-## Reality Check
-
-`tests/run.sh` is a stubbed smoke suite. It is useful, but it does not replace live macOS validation of `pfctl`, `launchctl`, Mullvad, and Tailscale.
+For docs-only changes, verify links and referenced paths; the shell checks may
+be skipped if the final report says so.
