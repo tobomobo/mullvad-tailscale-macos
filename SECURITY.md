@@ -14,7 +14,7 @@ defend the machine from another process or administrator that already has root.
 
 ## What This Repo Changes
 
-This repo always installs a PF anchor and adds the following two managed lines to `/etc/pf.conf`:
+The default installer adds a PF anchor and the following two managed lines to `/etc/pf.conf`:
 
 ```text
 anchor "tailscale"
@@ -68,6 +68,20 @@ Mullvad [documents macOS split tunneling](https://mullvad.net/en/blog/split-tunn
 their processes. This repo does not assume that an app-level exclusion is a
 stable contract for a privileged, independently managed `tailscaled` service.
 The target failure is observable at PF, so the workaround is kept at that layer.
+
+## Experimental Exit-Node Proxy
+
+The optional exit-node proxy is separate from the default PF workaround. It changes no PF rules and creates no additional `utun`. Instead, it runs an unprivileged second `tailscaled` identity in userspace-networking mode, with private state and a dedicated LocalAPI socket under the current user's Library directory.
+
+Every Tailscale CLI operation for this component is forced through that dedicated socket so it cannot reconfigure the primary Tailscale client. The private node is configured with one explicit exit-node selector, route acceptance disabled, no advertised routes or exit capability, LAN access disabled, posture reporting disabled, SSH disabled, shields-up enabled, and no support-log upload. `auto:any` is rejected. The listener is added only after a point-in-time status check reports the private backend running and the selected exit online; later verification compares the selected node with its stored stable ID.
+
+The SOCKS5 listener is unauthenticated and bound to literal `127.0.0.1`, not a wildcard or IPv6 address. This prevents access from remote interfaces, but loopback is shared by local users: another account on the same Mac can connect to the port. The private state directory is mode 700, while the LaunchAgent and stored configuration are mode 600; the installer also removes inherited ACL entries and refuses foreign owners or symbolic-link collisions for managed state.
+
+Most importantly, this is not exit-node fail-closed. Tailscale's userspace dial path may fall back to the Mac's ordinary system egress if the selected exit route disappears after the listener starts. The installer therefore refuses to operate unless Mullvad is connected with Lockdown mode enabled. Under that prerequisite the fallback should remain ordinary Mullvad egress, but its location and policy are no longer those of the chosen tailnet exit node.
+
+Application scope is also not a security boundary supplied by this repo. A client must opt into SOCKS5 itself. Prefer `socks5h` or an equivalent proxy-DNS mode; plain SOCKS can leak hostname resolution to the system resolver. UDP, QUIC, WebRTC, helper processes, and application-specific DNS may not follow a SOCKS setting.
+
+The red-team review considered transparent per-application interception but did not include it. The evaluated third-party interceptor could start or operate with direct-routing windows and did not provide a stable, enforceable configuration interface. A native macOS Network Extension could provide a stronger app-routing boundary, but that is a separate signed and notarized product rather than a safe shell-script addition to this repository.
 
 ## Why This Should Not Create A DNS Leak
 
@@ -233,6 +247,9 @@ Things that can still go wrong:
 - a Mullvad or macOS DNS-path change makes tailnet hostnames unreliable until a domain-scoped resolver override is installed
 - live PF behavior on a given host differs from the stubbed smoke tests in this repo
 - an unrelated root process reloads the main PF ruleset outside the repo's preservation path
+- the optional proxy's selected exit node goes offline after verification and userspace dialing falls back to ordinary Mullvad egress
+- an application resolves DNS itself, uses UDP or QUIC, spawns an unproxied helper, or otherwise bypasses its SOCKS5 setting
+- another local account uses the optional unauthenticated loopback SOCKS5 listener
 
 The repo tries to reduce those risks by:
 
@@ -243,6 +260,7 @@ The repo tries to reduce those risks by:
 - providing `verify.sh` for PF checks, optional resolver-override checks, and optional active checks
 - requiring the verifier to establish PF enablement, the exact runtime rule set, Mullvad attachment/rules, anchor order, connection state, and lockdown mode
 - offering an optional pf-watcher LaunchDaemon that reattaches the anchor to Tailscale's current interface without widening the exception
+- keeping the optional proxy on a dedicated LocalAPI socket and private state, withholding its listener until initial exit-node readiness, and verifying its stable exit-node identity
 
 ## Why This Repo Uses Standalone Mullvad Instead Of The Tailscale Mullvad Add-On
 
@@ -286,6 +304,14 @@ If you also installed the optional resolver override:
 sudo bash verify.sh --tailnet-domain your-tailnet.ts.net --magicdns-name <peer>.your-tailnet.ts.net
 cat /etc/resolver/your-tailnet.ts.net
 ```
+
+If you also installed the experimental exit-node proxy, run this as the logged-in user:
+
+```bash
+bash verify-exit-node-proxy.sh
+```
+
+Its direct and proxied public-IP comparison is a point-in-time connectivity check, not proof that every application protocol is proxied or that the exit route will remain selected.
 
 After a major macOS upgrade:
 

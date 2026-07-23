@@ -16,6 +16,7 @@ Before changing code, read:
 2. The relevant guide in `docs/`
 3. `SECURITY.md` for firewall, DNS, privilege, or security-claim changes
 4. `lib/common.sh` and the script being changed
+5. `lib/exit-node-proxy.sh` for optional exit-node proxy changes
 
 Inspect repo-owned command definitions before running them.
 
@@ -44,6 +45,10 @@ Inspect repo-owned command definitions before running them.
   validate, apply, and verify.
 - Keep LaunchDaemon management in repo scripts rather than ad hoc plist
   instructions.
+- Route every optional proxy `tailscale` command through its dedicated LocalAPI
+  socket; never let it mutate the primary client.
+- Do not describe the optional proxy as exit-node fail-closed: userspace dialing
+  can fall back to ordinary Mullvad egress.
 - Keep direct MagicDNS checks separate from macOS system-resolver checks;
   `/etc/hosts`, `dscacheutil`, and resolver precedence can make them disagree.
 - Keep resolver overrides domain-scoped under
@@ -52,7 +57,8 @@ Inspect repo-owned command definitions before running them.
 
 ## Making Changes
 
-- Put behavior shared by multiple scripts in `lib/common.sh`.
+- Put shared PF and default-lifecycle behavior in `lib/common.sh`; keep shared
+  optional proxy behavior in `lib/exit-node-proxy.sh`.
 - Update `tests/run.sh` when install, uninstall, verification, or shared-helper
   behavior changes.
 - Update the concise README path or focused guide when user-facing behavior

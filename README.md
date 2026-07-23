@@ -64,8 +64,22 @@ The default path needs only `install.sh`. Use the other scripts when you want a 
 | Repair only the automatic watcher | `sudo bash install-pf-watcher.sh` |
 | Refresh the active interface now | `sudo bash refresh-anchor.sh` |
 | Fix MagicDNS for normal macOS apps | `sudo bash install-tailnet-resolver.sh --tailnet-domain your-tailnet.ts.net` |
+| Expose an experimental per-user SOCKS5 transport through a tailnet exit node | `bash install-exit-node-proxy.sh --exit-node <advertised-node>` |
 
 Each install script has a matching uninstall script. The component scripts refuse to replace unrecognized privileged files unless an explicit adoption option is available.
+
+### Experimental exit-node proxy
+
+This opt-in component runs a second, unprivileged userspace Tailscale node and exposes it only at `127.0.0.1:1055` after an explicit advertised exit node is online:
+
+```bash
+bash install-exit-node-proxy.sh --exit-node <advertised-node>
+bash verify-exit-node-proxy.sh
+```
+
+Run it without `sudo`. It does not change PF, Mullvad split tunneling, the macOS system proxy, or the primary Tailscale client. Applications must support SOCKS5 themselves; use `socks5h://127.0.0.1:1055` when the client supports proxy-side hostname resolution. There is intentionally no transparent per-app interceptor in this first version.
+
+This is not exit-node fail-closed. Tailscale's userspace dialer can fall back to ordinary system egress if the selected exit route disappears, so the installer requires Mullvad to be connected with Lockdown mode enabled. The safe fallback is then ordinary Mullvad egress, not the selected tailnet exit node. Read the [security model](SECURITY.md#experimental-exit-node-proxy) before enabling it.
 
 ## If Something Fails
 
@@ -86,7 +100,7 @@ Start with `sudo bash verify.sh`, then use the matching guide:
 sudo bash uninstall.sh
 ```
 
-This removes the watcher and the managed PF policy. Optional components such as the repo-managed `tailscaled` daemon or tailnet resolver have their own uninstall scripts.
+This removes the watcher and the managed PF policy. Optional components such as the repo-managed `tailscaled` daemon, tailnet resolver, or experimental exit-node proxy have their own uninstall scripts. Remove the proxy with `bash uninstall-exit-node-proxy.sh` without `sudo`.
 
 ## Documentation
 

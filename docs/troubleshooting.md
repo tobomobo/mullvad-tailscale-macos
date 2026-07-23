@@ -103,6 +103,32 @@ tailscale up
 
 An unmarked existing plist is reported as a warning because this repository does not claim ownership of it. Loaded and running is still a valid state.
 
+## The Experimental Exit-Node Proxy Is Unavailable
+
+Start with the component-specific verifier, as the logged-in user and without `sudo`:
+
+```bash
+bash verify-exit-node-proxy.sh
+```
+
+Common causes are:
+
+- Mullvad is disconnected or Lockdown mode is disabled;
+- the dedicated Tailscale identity still needs browser authentication or tailnet device approval;
+- the requested device is not advertising an approved exit route, is offline, or is denied by tailnet policy;
+- Tailnet Lock has not signed the dedicated identity;
+- the dedicated node key expired;
+- another process already owns the selected loopback port; or
+- the application does not actually send all of its DNS and traffic through SOCKS5.
+
+The installer deliberately leaves the LaunchAgent in a no-listener state if authentication or the initial online-exit check fails. Fix the cause and rerun the installer. It accepts an explicit exit-node name, IP, or stable ID; `auto:any` is intentionally rejected so the selected policy cannot silently move to a different exit.
+
+For application configuration, prefer `socks5h://127.0.0.1:1055` or a "proxy DNS" option. Plain `socks5://` can resolve names outside the proxy. UDP, QUIC, WebRTC, helper processes, and application-specific DNS may bypass a SOCKS setting.
+
+The listener has no per-user authentication. It is restricted to literal IPv4 loopback, but another local macOS account can still connect to it. If that matters in your threat model, do not enable this optional component.
+
+An online exit node at verification time is not a continuous fail-closed guarantee. If the route disappears later, Tailscale's userspace dialer can fall back to the Mac's ordinary network path. Keep Mullvad connected with Lockdown enabled so that fallback remains Mullvad-protected, then re-run the verifier.
+
 ## MagicDNS Works Directly but macOS Apps Fail
 
 Direct MagicDNS and the macOS system resolver are different tests:
