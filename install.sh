@@ -52,7 +52,7 @@ restore_previous_anchor_file() {
   if [[ "$anchor_existed" -eq 1 ]]; then
     install_root_owned_file "$old_anchor" "$ANCHOR_FILE"
   else
-    "$RM_BIN" -f "$ANCHOR_FILE"
+    rm -f "$ANCHOR_FILE"
   fi
 }
 
@@ -83,7 +83,7 @@ rollback_installed_state() {
 
 if [[ -f "$ANCHOR_FILE" ]]; then
   anchor_file_managed_by_repo "$ANCHOR_FILE" || die "$ANCHOR_FILE exists but is not a recognized repo-managed anchor. Refusing to overwrite it."
-  "$CP_BIN" "$ANCHOR_FILE" "$old_anchor"
+  cp "$ANCHOR_FILE" "$old_anchor"
   anchor_existed=1
 elif managed_anchor_block_is_exact "$PF_CONF"; then
   echo "Repairing missing $ANCHOR_FILE referenced by the existing managed pf.conf block ..."
@@ -146,7 +146,7 @@ fi
 
 echo ""
 echo "Done. Verifying anchor is loaded:"
-"$PFCTL_BIN" -a "$TAILSCALE_ANCHOR_NAME" -sr 2>/dev/null || true
+pfctl -a "$TAILSCALE_ANCHOR_NAME" -sr 2>/dev/null || true
 
 echo ""
 echo "Installing or updating the automatic PF watcher ..."

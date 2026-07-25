@@ -97,9 +97,9 @@ if [[ -f "$ANCHOR_FILE" ]]; then
   if [[ -n "$installed_interface" ]]; then
     pass "Installed anchor targets $installed_interface"
     if anchor_file_managed_by_repo "$ANCHOR_FILE"; then
-      pass "Anchor file has a recognized ownership marker and the exact four-rule policy"
+      pass "Anchor file contains exactly the managed four-rule policy"
     else
-      fail "$ANCHOR_FILE is unmarked or contains rules outside the exact managed policy"
+      fail "$ANCHOR_FILE contains rules outside the exact managed policy"
     fi
     if file_is_root_owned_and_not_writable "$ANCHOR_FILE"; then
       pass "Anchor file is a regular root-owned file with no ACL or group/other write access"
@@ -189,14 +189,14 @@ fi
 
 echo "5. Daemon state"
 tailscaled_running=0
-if "$PGREP_BIN" -q tailscaled 2>/dev/null; then
+if pgrep -q tailscaled 2>/dev/null; then
   tailscaled_running=1
   pass "tailscaled is running"
 else
   warn "tailscaled is not running"
 fi
 
-if "$PGREP_BIN" -qf "mullvad-daemon" 2>/dev/null; then
+if pgrep -qf "mullvad-daemon" 2>/dev/null; then
   pass "mullvad-daemon is running"
 else
   warn "mullvad-daemon is not running"
@@ -223,10 +223,10 @@ fi
 if [[ -f "$TAILSCALED_DAEMON_PLIST" ]]; then
   if plist_managed_by_repo "$TAILSCALED_DAEMON_PLIST"; then
     pass "Repo-managed tailscaled LaunchDaemon plist exists"
-    if launchdaemon_loaded; then
+    if launchd_loaded "$TAILSCALED_DAEMON_LABEL"; then
       pass "Repo-managed tailscaled LaunchDaemon is loaded"
     else
-      fail "Repo-managed tailscaled LaunchDaemon is not loaded (inspect with: sudo launchctl print $(launchdaemon_service_target))"
+      fail "Repo-managed tailscaled LaunchDaemon is not loaded (inspect with: sudo launchctl print system/$TAILSCALED_DAEMON_LABEL)"
     fi
     if plist_uses_program "$TAILSCALED_DAEMON_PLIST" "$TAILSCALED_MANAGED_BIN" && \
       [[ -x "$TAILSCALED_MANAGED_BIN" ]] && file_is_root_owned_and_not_writable "$TAILSCALED_MANAGED_BIN"; then
@@ -241,7 +241,7 @@ if [[ -f "$TAILSCALED_DAEMON_PLIST" ]]; then
     fi
   else
     warn "$TAILSCALED_DAEMON_PLIST exists but is not marked as managed by this repo"
-    if launchdaemon_loaded; then
+    if launchd_loaded "$TAILSCALED_DAEMON_LABEL"; then
       pass "The unmarked tailscaled LaunchDaemon is loaded"
     else
       warn "The unmarked tailscaled LaunchDaemon is not loaded (inspect it before adopting it with install-tailscaled-daemon.sh --replace-existing)"
@@ -256,8 +256,6 @@ fi
 if [[ -f "$PF_WATCHER_PLIST" ]]; then
   if plist_managed_by_repo "$PF_WATCHER_PLIST" && pf_watcher_payload_managed_by_repo; then
     pass "PF watcher plist and payload have repo ownership markers"
-  elif legacy_pf_watcher_plist_managed_by_repo "$PF_WATCHER_PLIST" && legacy_pf_watcher_payload_managed_by_repo; then
-    warn "PF watcher is a recognized legacy install without ownership markers; rerun install-pf-watcher.sh to migrate it"
   else
     fail "PF watcher plist or payload is not recognized as repo-managed"
   fi
@@ -274,7 +272,7 @@ if [[ -f "$PF_WATCHER_PLIST" ]]; then
 fi
 
 echo "6. Mullvad content-blocker DNS"
-if command -v "$SCUTIL_BIN" >/dev/null 2>&1; then
+if command -v scutil >/dev/null 2>&1; then
   blocker_dns="$(mullvad_blocker_dns_in_use)"
   if [[ -n "$blocker_dns" ]]; then
     if [[ -n "$active_interface" ]]; then
@@ -313,13 +311,13 @@ if [[ -n "$TAILNET_DOMAIN" ]]; then
 fi
 
 if [[ -n "$TAILNET_TARGET" ]]; then
-  if tsmp_output="$("$TAILSCALE_BIN" ping --tsmp --c 1 --timeout 5s "$TAILNET_TARGET" 2>&1)"; then
+  if tsmp_output="$(tailscale ping --tsmp --c 1 --timeout 5s "$TAILNET_TARGET" 2>&1)"; then
     pass "TSMP ping succeeded for $TAILNET_TARGET"
   else
     fail "TSMP ping failed for $TAILNET_TARGET"
   fi
 
-  if disco_output="$("$TAILSCALE_BIN" ping --c 3 --timeout 5s "$TAILNET_TARGET" 2>&1)"; then
+  if disco_output="$(tailscale ping --c 3 --timeout 5s "$TAILNET_TARGET" 2>&1)"; then
     pass "Direct or peer-routed DISCO path established for $TAILNET_TARGET"
   elif grep -qi "direct connection not established" <<<"$disco_output" || grep -qi "via DERP" <<<"$disco_output"; then
     warn "Tailnet reachability works, but no direct DISCO path was established for $TAILNET_TARGET; Tailscale is falling back to DERP"
@@ -349,7 +347,7 @@ if [[ -n "$MAGICDNS_NAME" ]]; then
     warn "$HOSTS_FILE contains a static override for $MAGICDNS_NAME ($(join_lines "$hosts_override_ips")); app-level access may work even if MagicDNS is misconfigured"
   fi
 
-  if command -v "$DSCACHEUTIL_BIN" >/dev/null 2>&1; then
+  if command -v dscacheutil >/dev/null 2>&1; then
     system_resolver_ips="$(system_resolver_lookup "$MAGICDNS_NAME")"
     if [[ -n "$system_resolver_ips" ]]; then
       if [[ -n "$direct_magicdns_ips" ]] && list_has_common_line "$direct_magicdns_ips" "$system_resolver_ips"; then
@@ -374,7 +372,7 @@ else
 fi
 
 if [[ "$CHECK_MULLVAD" -eq 1 ]]; then
-  mullvad_check="$("$CURL_BIN" -fsS https://am.i.mullvad.net/connected 2>/dev/null || true)"
+  mullvad_check="$(curl -fsS https://am.i.mullvad.net/connected 2>/dev/null || true)"
   if grep -qi "not connected to Mullvad" <<<"$mullvad_check"; then
     fail "Mullvad connection check reported traffic outside the Mullvad tunnel"
   elif grep -qi "connected to Mullvad" <<<"$mullvad_check"; then

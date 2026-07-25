@@ -6,13 +6,9 @@ This page covers component-level operation. Most users only need the default lif
 
 ## Default Lifecycle
 
-Install or repair everything required by the PF workaround:
-
-```bash
-sudo bash install.sh
-```
-
-The command:
+`sudo bash install.sh` -> `sudo bash verify.sh` -> `sudo bash uninstall.sh`, as
+described in the [quick start](../README.md#install). Beyond what the README
+covers, `install.sh` performs these steps in order:
 
 1. detects the `utun` interface carrying Tailscale's own address;
 2. renders and validates the four interface-scoped PF rules;
@@ -21,36 +17,11 @@ The command:
 5. verifies the live rules and anchor order; and
 6. installs or updates the automatic PF watcher.
 
-Check the resulting configuration and live state:
+`uninstall.sh` removes the watcher, the managed `/etc/pf.conf` block, and the
+installed Tailscale anchor. It does not remove separately installed optional
+components; each has its own uninstall script.
 
-```bash
-sudo bash verify.sh
-```
-
-Remove the default installation:
-
-```bash
-sudo bash uninstall.sh
-```
-
-`uninstall.sh` removes the watcher, the managed `/etc/pf.conf` block, and the installed Tailscale anchor. It does not remove separately installed optional components.
-
-## Script Reference
-
-| Script | Purpose |
-| --- | --- |
-| `install.sh` | Default install and repair: PF policy plus watcher |
-| `uninstall.sh` | Remove the default PF policy and watcher |
-| `verify.sh` | Check configuration, ownership, service state, and optional live connectivity |
-| `refresh-anchor.sh` | Re-detect the interface and repair the live PF attachment now |
-| `install-pf-watcher.sh` | Install or repair only the automatic watcher |
-| `uninstall-pf-watcher.sh` | Remove only the automatic watcher |
-| `install-tailscaled-daemon.sh` | Optionally manage a detected `tailscaled` binary as a system LaunchDaemon |
-| `uninstall-tailscaled-daemon.sh` | Remove only the repo-managed `tailscaled` LaunchDaemon |
-| `install-tailnet-resolver.sh` | Optionally route one `*.ts.net` tailnet domain to MagicDNS |
-| `uninstall-tailnet-resolver.sh` | Remove one repo-managed tailnet resolver override |
-
-Run `bash <script> --help` for its exact options.
+Run `bash <script> --help` for any script's exact options.
 
 ## Interface Override
 
@@ -150,20 +121,14 @@ See [Troubleshooting](troubleshooting.md#magicdns-works-directly-but-macos-apps-
 
 ## Active Verification
 
-The default verifier checks configuration and local service state. Add a peer and hostname to test more of the live path:
-
-```bash
-sudo bash verify.sh \
-  --tailnet-target <peer> \
-  --magicdns-name <peer>.your-tailnet.ts.net
-```
-
-With a target, the verifier distinguishes:
+Passing `--tailnet-target` and `--magicdns-name` (see the
+[README](../README.md#verify)) makes the verifier distinguish:
 
 - tailnet reachability via TSMP; and
 - direct DISCO path establishment versus DERP relay fallback.
 
-A reachable peer using DERP is reported as working with a warning, not as a failed PF installation.
+A reachable peer using DERP is reported as working with a warning, not as a
+failed PF installation.
 
 ## After macOS, Mullvad, or Tailscale Updates
 

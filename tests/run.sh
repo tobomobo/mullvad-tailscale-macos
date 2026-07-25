@@ -305,21 +305,14 @@ run_install_env() {
   shift
 
   local bin_dir="$workspace/bin"
+  PATH="$bin_dir:$PATH" \
   TEST_LOG_DIR="$workspace/logs" \
   IFCONFIG_FIXTURES_DIR="$workspace/ifconfig" \
   SKIP_ROOT_CHECK=1 \
   PF_CONF="$workspace/pf.conf" \
   ANCHOR_FILE="$workspace/pf.anchors/tailscale" \
-  PFCTL_BIN="$bin_dir/pfctl" \
-  IFCONFIG_BIN="$bin_dir/ifconfig" \
-  TAILSCALE_BIN="$bin_dir/tailscale" \
-  MULLVAD_BIN="$bin_dir/mullvad" \
   PF_WATCHER_INSTALL_DIR="$workspace/watcher" \
   PF_WATCHER_PLIST="$workspace/com.mullvad-tailscale-macos.pf-watcher.plist" \
-  PF_WATCHER_LOG="/dev/null" \
-  PLUTIL_BIN="$bin_dir/plutil" \
-  LAUNCHCTL_BIN="$bin_dir/launchctl" \
-  CHOWN_BIN="$bin_dir/chown" \
   CHMOD_BIN="$bin_dir/chmod" \
   bash "$ROOT_DIR/install.sh" "$@"
 }
@@ -329,15 +322,13 @@ run_uninstall_env() {
   shift
 
   local bin_dir="$workspace/bin"
+  PATH="$bin_dir:$PATH" \
   TEST_LOG_DIR="$workspace/logs" \
   SKIP_ROOT_CHECK=1 \
   PF_CONF="$workspace/pf.conf" \
   ANCHOR_FILE="$workspace/pf.anchors/tailscale" \
-  PFCTL_BIN="$bin_dir/pfctl" \
-  MULLVAD_BIN="$bin_dir/mullvad" \
   PF_WATCHER_INSTALL_DIR="$workspace/watcher" \
   PF_WATCHER_PLIST="$workspace/com.mullvad-tailscale-macos.pf-watcher.plist" \
-  LAUNCHCTL_BIN="$bin_dir/launchctl" \
   bash "$ROOT_DIR/uninstall.sh" "$@"
 }
 
@@ -346,24 +337,14 @@ run_verify_env() {
   shift
 
   local bin_dir="$workspace/bin"
+  PATH="$bin_dir:$PATH" \
   TEST_LOG_DIR="$workspace/logs" \
   IFCONFIG_FIXTURES_DIR="$workspace/ifconfig" \
   SKIP_ROOT_CHECK=1 \
   PF_CONF="$workspace/pf.conf" \
   ANCHOR_FILE="$workspace/pf.anchors/tailscale" \
   RESOLVER_DIR="$workspace/resolver" \
-  PFCTL_BIN="$bin_dir/pfctl" \
-  IFCONFIG_BIN="$bin_dir/ifconfig" \
-  MULLVAD_BIN="$bin_dir/mullvad" \
-  PGREP_BIN="$bin_dir/pgrep" \
-  CURL_BIN="$bin_dir/curl" \
-  DIG_BIN="$bin_dir/dig" \
-  DSCACHEUTIL_BIN="$bin_dir/dscacheutil" \
-  SCUTIL_BIN="$bin_dir/scutil" \
-  KILLALL_BIN="$bin_dir/killall" \
   HOSTS_FILE="$workspace/hosts" \
-  TAILSCALE_BIN="$bin_dir/tailscale" \
-  LAUNCHCTL_BIN="$bin_dir/launchctl" \
   STAT_BIN="$bin_dir/stat" \
   TAILSCALED_DAEMON_PLIST="$workspace/com.tailscale.tailscaled.plist" \
   TAILSCALED_MANAGED_BIN="$workspace/managed-tailscaled" \
@@ -377,14 +358,12 @@ run_daemon_install_env() {
   shift
 
   local bin_dir="$workspace/bin"
+  PATH="$bin_dir:$PATH" \
   TEST_LOG_DIR="$workspace/logs" \
   SKIP_ROOT_CHECK=1 \
   TAILSCALED_BIN="$workspace/source-tailscaled" \
   TAILSCALED_MANAGED_BIN="$workspace/managed-tailscaled" \
   TAILSCALED_DAEMON_PLIST="$workspace/com.tailscale.tailscaled.plist" \
-  PLUTIL_BIN="$bin_dir/plutil" \
-  LAUNCHCTL_BIN="$bin_dir/launchctl" \
-  CHOWN_BIN="$bin_dir/chown" \
   CHMOD_BIN="$bin_dir/chmod" \
   bash "$ROOT_DIR/install-tailscaled-daemon.sh" "$@"
 }
@@ -394,11 +373,11 @@ run_daemon_uninstall_env() {
   shift
 
   local bin_dir="$workspace/bin"
+  PATH="$bin_dir:$PATH" \
   TEST_LOG_DIR="$workspace/logs" \
   SKIP_ROOT_CHECK=1 \
   TAILSCALED_DAEMON_PLIST="$workspace/com.tailscale.tailscaled.plist" \
   TAILSCALED_MANAGED_BIN="$workspace/managed-tailscaled" \
-  LAUNCHCTL_BIN="$bin_dir/launchctl" \
   bash "$ROOT_DIR/uninstall-tailscaled-daemon.sh" "$@"
 }
 
@@ -407,14 +386,11 @@ run_resolver_install_env() {
   shift
 
   local bin_dir="$workspace/bin"
+  PATH="$bin_dir:$PATH" \
   TEST_LOG_DIR="$workspace/logs" \
   SKIP_ROOT_CHECK=1 \
   RESOLVER_DIR="$workspace/resolver" \
-  DSCACHEUTIL_BIN="$bin_dir/dscacheutil" \
-  KILLALL_BIN="$bin_dir/killall" \
-  CHOWN_BIN="$bin_dir/chown" \
   CHMOD_BIN="$bin_dir/chmod" \
-  CP_BIN="cp" \
   bash "$ROOT_DIR/install-tailnet-resolver.sh" "$@"
 }
 
@@ -423,12 +399,10 @@ run_resolver_uninstall_env() {
   shift
 
   local bin_dir="$workspace/bin"
+  PATH="$bin_dir:$PATH" \
   TEST_LOG_DIR="$workspace/logs" \
   SKIP_ROOT_CHECK=1 \
   RESOLVER_DIR="$workspace/resolver" \
-  DSCACHEUTIL_BIN="$bin_dir/dscacheutil" \
-  KILLALL_BIN="$bin_dir/killall" \
-  CP_BIN="cp" \
   bash "$ROOT_DIR/uninstall-tailnet-resolver.sh" "$@"
 }
 
@@ -437,16 +411,12 @@ run_pf_watcher_install_env() {
   shift
 
   local bin_dir="$workspace/bin"
+  PATH="$bin_dir:$PATH" \
   TEST_LOG_DIR="$workspace/logs" \
   SKIP_ROOT_CHECK=1 \
   PF_WATCHER_INSTALL_DIR="$workspace/watcher" \
   PF_WATCHER_PLIST="$workspace/com.mullvad-tailscale-macos.pf-watcher.plist" \
-  PF_WATCHER_LOG="/dev/null" \
-  PLUTIL_BIN="$bin_dir/plutil" \
-  LAUNCHCTL_BIN="$bin_dir/launchctl" \
-  CHOWN_BIN="$bin_dir/chown" \
   CHMOD_BIN="$bin_dir/chmod" \
-  CP_BIN="cp" \
   bash "$ROOT_DIR/install-pf-watcher.sh" "$@"
 }
 
@@ -455,12 +425,11 @@ run_pf_watcher_uninstall_env() {
   shift
 
   local bin_dir="$workspace/bin"
+  PATH="$bin_dir:$PATH" \
   TEST_LOG_DIR="$workspace/logs" \
   SKIP_ROOT_CHECK=1 \
   PF_WATCHER_INSTALL_DIR="$workspace/watcher" \
   PF_WATCHER_PLIST="$workspace/com.mullvad-tailscale-macos.pf-watcher.plist" \
-  LAUNCHCTL_BIN="$bin_dir/launchctl" \
-  RM_BIN="rm" \
   bash "$ROOT_DIR/uninstall-pf-watcher.sh" "$@"
 }
 
@@ -469,18 +438,13 @@ run_refresh_env() {
   shift
 
   local bin_dir="$workspace/bin"
+  PATH="$bin_dir:$PATH" \
   TEST_LOG_DIR="$workspace/logs" \
   IFCONFIG_FIXTURES_DIR="$workspace/ifconfig" \
   SKIP_ROOT_CHECK=1 \
   PF_CONF="$workspace/pf.conf" \
   ANCHOR_FILE="$workspace/pf.anchors/tailscale" \
-  PFCTL_BIN="$bin_dir/pfctl" \
-  IFCONFIG_BIN="$bin_dir/ifconfig" \
-  TAILSCALE_BIN="$bin_dir/tailscale" \
-  MULLVAD_BIN="$bin_dir/mullvad" \
-  CHOWN_BIN="$bin_dir/chown" \
   CHMOD_BIN="$bin_dir/chmod" \
-  CP_BIN="cp" \
   bash "$ROOT_DIR/refresh-anchor.sh" "$@"
 }
 
@@ -1054,10 +1018,8 @@ EOF
   /bin/chmod +a "everyone allow write" "$workspace/destination"
 
   if ! output="$(
-    PATH="$shadow_dir:$PATH" \
+    PATH="$shadow_dir:$workspace/bin:$PATH" \
     SCRIPT_DIR="$ROOT_DIR" \
-    CHOWN_BIN="$workspace/bin/chown" \
-    CP_BIN=/bin/cp \
     bash -c 'set -euo pipefail; unset CHMOD_BIN; source "$SCRIPT_DIR/lib/common.sh"; install_root_owned_file "$1" "$2"' \
       _ "$workspace/source" "$workspace/destination" 2>&1
   )"; then
@@ -1229,22 +1191,33 @@ EOF
 }
 
 test_blocker_dns_classifier_boundaries() {
+  local workspace
   local out
-  if ! out="$(
-    ROOT_DIR="$ROOT_DIR" bash -c '
-      source "$ROOT_DIR/lib/common.sh"
-      rc=0
-      for ip in 100.64.0.1 100.64.0.3 100.64.0.7 100.64.0.10 100.64.0.63; do
-        dns_server_is_mullvad_blocker "$ip" || { echo "should-accept $ip"; rc=1; }
-      done
-      for ip in 100.64.0.0 100.64.0.64 100.64.0.255 10.64.0.1 100.100.100.100 192.168.0.1; do
-        dns_server_is_mullvad_blocker "$ip" && { echo "should-reject $ip"; rc=1; }
-      done
-      exit $rc
-    ' 2>&1
-  )"; then
-    fail "Blocker DNS classifier misclassified: $out"
-  fi
+  local scutil_output=""
+  local ip
+  local accept=(100.64.0.1 100.64.0.3 100.64.0.7 100.64.0.10 100.64.0.63)
+  local reject=(100.64.0.0 100.64.0.64 100.64.0.255 10.64.0.1 100.100.100.100 192.168.0.1)
+  workspace="$(new_workspace blocker-dns-boundaries)"
+
+  for ip in "${accept[@]}" "${reject[@]}"; do
+    scutil_output+="  nameserver[0] : $ip"$'\n'
+  done
+
+  out="$(
+    PATH="$workspace/bin:$PATH" \
+    ROOT_DIR="$ROOT_DIR" \
+    SCUTIL_OUTPUT="$scutil_output" \
+    bash -c 'source "$ROOT_DIR/lib/common.sh"; mullvad_blocker_dns_in_use'
+  )"
+
+  for ip in "${accept[@]}"; do
+    grep -Fqx -- "$ip" <<<"$out" || fail "Blocker DNS classifier should have flagged $ip"
+  done
+  for ip in "${reject[@]}"; do
+    if grep -Fqx -- "$ip" <<<"$out"; then
+      fail "Blocker DNS classifier should not have flagged $ip"
+    fi
+  done
   pass "Mullvad content-blocker DNS classifier accepts 100.64.0.1-63 and rejects everything else"
 }
 
@@ -1297,7 +1270,10 @@ EOF
   [[ ! -f "$workspace/resolver/bear-skate.ts.net" ]] || fail "Expected resolver override to be removed"
   assert_file_contains "$workspace/logs/dscacheutil.calls" "-flushcache"
   assert_file_contains "$workspace/logs/killall.calls" "-HUP mDNSResponder"
-  pass "resolver uninstaller removes the override and flushes DNS"
+  # Backups must stay timestamped, or repeated runs overwrite each other.
+  compgen -G "$workspace/resolver/bear-skate.ts.net.bak.[0-9]*" >/dev/null || \
+    fail "Expected a timestamped backup of the removed resolver override"
+  pass "resolver uninstaller removes the override, keeps a timestamped backup, and flushes DNS"
 }
 
 test_resolver_uninstaller_refuses_unmanaged_existing_file() {

@@ -14,18 +14,7 @@ active anchor.
 EOF
 }
 
-if [[ $# -gt 0 ]]; then
-  case "$1" in
-    --help|-h)
-      usage
-      exit 0
-      ;;
-    *)
-      usage >&2
-      exit 1
-      ;;
-  esac
-fi
+parse_help_only "$@"
 
 require_root
 
@@ -54,7 +43,7 @@ fi
 
 if [[ -f "$ANCHOR_FILE" ]]; then
   echo "Removing $ANCHOR_FILE ..."
-  "$RM_BIN" "$ANCHOR_FILE"
+  rm "$ANCHOR_FILE"
 else
   echo "Anchor file $ANCHOR_FILE not found, skipping."
 fi

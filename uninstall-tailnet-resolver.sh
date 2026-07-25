@@ -42,7 +42,7 @@ if [[ -f "$resolver_file" ]]; then
   backup_path="$(backup_file "$resolver_file")"
   echo "Backed up $resolver_file to $backup_path"
   echo "Removing resolver override $resolver_file ..."
-  "$RM_BIN" "$resolver_file"
+  rm "$resolver_file"
 else
   echo "Resolver override $resolver_file not found, skipping."
 fi

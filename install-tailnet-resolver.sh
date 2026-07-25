@@ -46,7 +46,7 @@ resolver_file_managed_by_repo "$tmp_resolver" || die "Generated resolver file is
 resolver_file_has_nameserver "$tmp_resolver" || die "Generated resolver file is invalid."
 
 echo "Ensuring $RESOLVER_DIR exists ..."
-"$MKDIR_BIN" -p "$RESOLVER_DIR"
+mkdir -p "$RESOLVER_DIR"
 
 if [[ -f "$resolver_file" ]]; then
   if ! resolver_file_managed_by_repo "$resolver_file"; then

@@ -12,18 +12,7 @@ Removes the system LaunchDaemon installed by install-tailscaled-daemon.sh.
 EOF
 }
 
-if [[ $# -gt 0 ]]; then
-  case "$1" in
-    --help|-h)
-      usage
-      exit 0
-      ;;
-    *)
-      usage >&2
-      exit 1
-      ;;
-  esac
-fi
+parse_help_only "$@"
 
 require_root
 
@@ -36,18 +25,18 @@ if [[ ! -f "$TAILSCALED_DAEMON_PLIST" && -e "$TAILSCALED_MANAGED_BIN" ]]; then
 fi
 
 echo "Stopping $TAILSCALED_DAEMON_LABEL if it is loaded ..."
-bootout_launchdaemon || true
+bootout_launchd "$TAILSCALED_DAEMON_LABEL" || true
 
 if [[ -f "$TAILSCALED_DAEMON_PLIST" ]]; then
   echo "Removing $TAILSCALED_DAEMON_PLIST ..."
-  "$RM_BIN" "$TAILSCALED_DAEMON_PLIST"
+  rm "$TAILSCALED_DAEMON_PLIST"
 else
   echo "LaunchDaemon plist not found, skipping."
 fi
 
 if [[ -f "$TAILSCALED_MANAGED_BIN" ]]; then
   echo "Removing $TAILSCALED_MANAGED_BIN ..."
-  "$RM_BIN" "$TAILSCALED_MANAGED_BIN"
+  rm "$TAILSCALED_MANAGED_BIN"
 fi
 
 echo ""
