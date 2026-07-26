@@ -213,8 +213,9 @@ plist at the copy. Existing unmarked plists require an explicit
 `--replace-existing` adoption step.
 
 Repo-managed plists, resolver files, and watcher payloads carry markers; the PF
-anchor file is instead recognized by matching the exact narrow policy, byte for
-byte. Installers and uninstallers refuse unrecognized collisions. LaunchDaemon
+anchor file is instead recognized by containing exactly the four expected rules
+and nothing else, ignoring comments and blank lines. Its marker comment is
+advisory. Installers and uninstallers refuse unrecognized collisions. LaunchDaemon
 stdout and stderr go to `/dev/null` so tailnet addresses and topology do not
 accumulate in persistent world-readable files; interactive script execution
 remains available for diagnostics. Installers also require `launchctl print` to confirm that a newly

@@ -1723,6 +1723,7 @@ test_daemon_scripts_refuse_unmarked_plist() {
 
 test_watcher_scripts_refuse_unrecognized_artifacts() {
   local workspace
+  local output
   workspace="$(new_workspace watcher-unmarked)"
 
   mkdir -p "$workspace/watcher"
@@ -1730,9 +1731,13 @@ test_watcher_scripts_refuse_unrecognized_artifacts() {
   printf '%s\n' '<plist><dict><string>foreign watcher</string></dict></plist>' > "$workspace/com.mullvad-tailscale-macos.pf-watcher.plist"
 
   run_pf_watcher_install_env "$workspace" >/dev/null 2>&1 && fail "watcher installer should refuse unrecognized artifacts"
-  run_pf_watcher_uninstall_env "$workspace" >/dev/null 2>&1 && fail "watcher uninstaller should refuse unrecognized artifacts"
+  output="$(run_pf_watcher_uninstall_env "$workspace" 2>&1)" && fail "watcher uninstaller should refuse unrecognized artifacts"
   assert_file_contains "$workspace/watcher/foreign" "foreign payload"
-  pass "watcher scripts refuse to overwrite or delete unrecognized artifacts"
+  # The removal path has no adoption flag, so the refusal must name the manual
+  # steps or an install from an earlier revision cannot be uninstalled at all.
+  grep -Fq "launchctl bootout system/com.mullvad-tailscale-macos.pf-watcher" <<<"$output" || \
+    fail "Expected the refusal to name the manual removal steps: $output"
+  pass "watcher scripts refuse to overwrite or delete unrecognized artifacts and explain manual removal"
 }
 
 test_refresh_refuses_when_mullvad_protection_is_missing() {
