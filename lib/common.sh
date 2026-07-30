@@ -187,15 +187,15 @@ detect_tailscale_interface() {
 
   local iface
   local config
+  local detected_interface=""
   local tailscale_ipv4
   local tailscale_ipv6
 
-  tailscale_ipv4="$(tailscale ip -4 2>/dev/null | awk 'NF { print $1; exit }')"
-  tailscale_ipv6="$(tailscale ip -6 2>/dev/null | awk 'NF { print $1; exit }')"
+  tailscale_ipv4="$(tailscale ip -4 2>/dev/null | awk 'NF { print $1; exit }' || true)"
+  tailscale_ipv6="$(tailscale ip -6 2>/dev/null | awk 'NF { print $1; exit }' || true)"
 
   [[ "$tailscale_ipv4" =~ ^100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.[0-9]{1,3}\.[0-9]{1,3}$ ]] || tailscale_ipv4=""
   [[ "$tailscale_ipv6" =~ ^fd7a:115c:a1e0: ]] || tailscale_ipv6=""
-  [[ -n "$tailscale_ipv4" || -n "$tailscale_ipv6" ]] || return 1
 
   for iface in $(ifconfig -l 2>/dev/null || true); do
     [[ "$iface" == utun* ]] || continue
@@ -209,9 +209,15 @@ detect_tailscale_interface() {
       echo "$iface"
       return 0
     fi
+    if [[ -z "$tailscale_ipv4" && -z "$tailscale_ipv6" ]] && \
+      awk '$1 == "inet6" { sub(/%.*/, "", $2); if ($2 ~ /^fd7a:115c:a1e0:/) found=1 } END { exit !found }' <<<"$config"; then
+      [[ -z "$detected_interface" ]] || return 1
+      detected_interface="$iface"
+    fi
   done
 
-  return 1
+  [[ -n "$detected_interface" ]] || return 1
+  echo "$detected_interface"
 }
 
 anchor_interface_from_file() {
@@ -542,7 +548,9 @@ mullvad_pf_protection_is_consistent() {
   local anchor_calls
   local rules
 
-  mullvad_protection_is_expected || return 0
+  if ! mullvad_protection_is_expected && command -v mullvad >/dev/null 2>&1; then
+    return 0
+  fi
   anchor_calls="$(pf_main_anchor_calls)" || return 1
   pf_main_anchor_is_called "$MULLVAD_ANCHOR_NAME" "$anchor_calls" || return 1
   rules="$(pf_anchor_rules "$MULLVAD_ANCHOR_NAME")" || return 1

@@ -1368,6 +1368,60 @@ test_pf_watcher_uninstaller_boots_out_and_removes() {
   pass "pf-watcher uninstaller unloads, removes the plist, and removes the payload"
 }
 
+test_interface_detection_without_tailscale_cli() {
+  local workspace
+  local interface
+  workspace="$(new_workspace interface-without-cli)"
+
+  rm "$workspace/bin/tailscale"
+  cat > "$workspace/ifconfig/utun8" <<'EOF'
+utun8: flags=8051<UP,POINTOPOINT,RUNNING,MULTICAST> mtu 1280
+	inet 100.82.1.2 --> 100.82.1.2 netmask 0xffffffff
+	inet6 fd7a:115c:a1e0::5252:102 --> fd7a:115c:a1e0::5252:102 prefixlen 128
+EOF
+
+  interface="$(
+    PATH="$workspace/bin:/usr/bin:/bin" \
+    IFCONFIG_LIST="lo0 utun8" \
+    IFCONFIG_FIXTURES_DIR="$workspace/ifconfig" \
+    ROOT_DIR="$ROOT_DIR" \
+    bash -c 'source "$ROOT_DIR/lib/common.sh"; detect_tailscale_interface'
+  )" || fail "Expected interface detection to work without the Tailscale CLI in PATH"
+
+  [[ "$interface" == "utun8" ]] || fail "Expected utun8 without the Tailscale CLI, got: $interface"
+  cp "$workspace/ifconfig/utun8" "$workspace/ifconfig/utun9"
+  if PATH="$workspace/bin:/usr/bin:/bin" \
+    IFCONFIG_LIST="lo0 utun8 utun9" \
+    IFCONFIG_FIXTURES_DIR="$workspace/ifconfig" \
+    ROOT_DIR="$ROOT_DIR" \
+    bash -c 'source "$ROOT_DIR/lib/common.sh"; detect_tailscale_interface' >/dev/null; then
+    fail "Expected fallback interface detection to reject multiple matching utuns"
+  fi
+  pass "interface detection survives launchd PATH without the Tailscale CLI"
+}
+
+test_missing_mullvad_cli_requires_active_pf_protection() {
+  local workspace
+  workspace="$(new_workspace mullvad-without-cli)"
+  rm "$workspace/bin/mullvad"
+
+  if PATH="$workspace/bin:/usr/bin:/bin" \
+    TEST_LOG_DIR="$workspace/logs" \
+    PFCTL_MAIN_RULES='anchor "tailscale" all' \
+    ROOT_DIR="$ROOT_DIR" \
+    bash -c 'source "$ROOT_DIR/lib/common.sh"; mullvad_pf_protection_is_consistent'; then
+    fail "Expected missing Mullvad CLI and anchor to fail closed"
+  fi
+
+  PATH="$workspace/bin:/usr/bin:/bin" \
+    TEST_LOG_DIR="$workspace/logs" \
+    PFCTL_MAIN_RULES='anchor "tailscale" all\nanchor "mullvad" all' \
+    ROOT_DIR="$ROOT_DIR" \
+    bash -c 'source "$ROOT_DIR/lib/common.sh"; mullvad_pf_protection_is_consistent' || \
+    fail "Expected active Mullvad PF protection to replace the unavailable CLI check"
+  pass "missing Mullvad CLI requires active PF protection"
+}
+
 test_refresh_reattaches_anchor_on_interface_change() {
   local workspace
   workspace="$(new_workspace refresh-change)"
@@ -1802,6 +1856,8 @@ test_daemon_uninstaller_boots_out_and_removes_plist
 test_daemon_scripts_refuse_unmarked_plist
 test_pf_watcher_installer_installs_payload_and_bootstraps
 test_pf_watcher_uninstaller_boots_out_and_removes
+test_interface_detection_without_tailscale_cli
+test_missing_mullvad_cli_requires_active_pf_protection
 test_watcher_scripts_refuse_unrecognized_artifacts
 test_refresh_reattaches_anchor_on_interface_change
 test_refresh_noop_when_interface_unchanged

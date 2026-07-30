@@ -12,7 +12,10 @@ Fix failures before warnings. Warnings about omitted active targets are expected
 
 ## The Tailscale Interface Cannot Be Detected
 
-The installer identifies the `utun` that carries the address returned by `tailscale ip`. Confirm Tailscale is connected:
+The installer identifies the `utun` that carries the address returned by
+`tailscale ip`. The watcher can also identify a sole `utun` carrying
+Tailscale's IPv6 ULA prefix when launchd cannot find the CLI; it still requires
+active Mullvad PF protection before changing PF. Confirm Tailscale is connected:
 
 ```bash
 tailscale status

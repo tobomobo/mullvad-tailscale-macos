@@ -25,7 +25,11 @@ Run `bash <script> --help` for any script's exact options.
 
 ## Interface Override
 
-Automatic detection matches the output of `tailscale ip` to the current macOS interfaces. If Tailscale cannot be started before installation, you can supply a known interface:
+Automatic detection matches the output of `tailscale ip` to the current macOS
+interfaces. When launchd cannot find the Tailscale CLI, the watcher instead
+requires exactly one `utun` carrying Tailscale's IPv6 ULA prefix and active
+Mullvad PF protection. If Tailscale cannot be started before installation, you
+can supply a known interface:
 
 ```bash
 sudo bash install.sh --interface utun3
