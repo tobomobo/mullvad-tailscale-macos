@@ -178,7 +178,17 @@ mullvad_blocker_dns_in_use() {
   ' | grep -E "$MULLVAD_BLOCKER_DNS_REGEX" || true
 }
 
+tailscale_backends_are_ambiguous() {
+  pgrep -q tailscaled 2>/dev/null &&
+    pgrep -qf 'io\.tailscale\.ipn\.macsys\.network-extension|IPNExtension' 2>/dev/null
+}
+
+# Exit codes: 1 = no interface found, 2 = two Tailscale backends are running,
+# 3 = several utuns carry the Tailscale ULA prefix. Callers report 2 and 3
+# loudly instead of treating them like "Tailscale is not running".
 detect_tailscale_interface() {
+  tailscale_backends_are_ambiguous && return 2
+
   if [[ -n "${TAILSCALE_INTERFACE:-}" ]]; then
     [[ "$TAILSCALE_INTERFACE" =~ ^utun[0-9]+$ ]] || return 1
     echo "$TAILSCALE_INTERFACE"
@@ -211,9 +221,7 @@ detect_tailscale_interface() {
     fi
     if [[ -z "$tailscale_ipv4" && -z "$tailscale_ipv6" ]] && \
       awk '$1 == "inet6" { sub(/%.*/, "", $2); if ($2 ~ /^fd7a:115c:a1e0:/) found=1 } END { exit !found }' <<<"$config"; then
-      # Exit 2 marks an ambiguous match so callers can fail loudly instead of
-      # treating it like "Tailscale is not running".
-      [[ -z "$detected_interface" ]] || return 2
+      [[ -z "$detected_interface" ]] || return 3
       detected_interface="$iface"
     fi
   done

@@ -216,6 +216,9 @@ EOF
   cat > "$bin_dir/pgrep" <<'EOF'
 #!/bin/bash
 case "$*" in
+  *io.tailscale.ipn.macsys.network-extension*|*IPNExtension*)
+    exit "${PGREP_TAILSCALE_EXTENSION_EXIT:-1}"
+    ;;
   *tailscaled*)
     exit "${PGREP_TAILSCALED_EXIT:-1}"
     ;;
@@ -1396,7 +1399,7 @@ EOF
     IFCONFIG_FIXTURES_DIR="$workspace/ifconfig" \
     ROOT_DIR="$ROOT_DIR" \
     bash -c 'source "$ROOT_DIR/lib/common.sh"; detect_tailscale_interface' >/dev/null || detect_status=$?
-  [[ "$detect_status" -eq 2 ]] || fail "Expected fallback detection to exit 2 for multiple matching utuns, got: $detect_status"
+  [[ "$detect_status" -eq 3 ]] || fail "Expected fallback detection to exit 3 for multiple matching utuns, got: $detect_status"
   pass "interface detection survives launchd PATH without the Tailscale CLI"
 }
 
@@ -1784,6 +1787,42 @@ EOF
   pass "interface detection ignores unrelated 100.x tunnels and matches tailscale ip exactly"
 }
 
+test_scripts_reject_multiple_tailscale_backends() {
+  local workspace
+  local output
+  workspace="$(new_workspace dual-tailscale-backends)"
+
+  if output="$(
+    PGREP_TAILSCALED_EXIT=0 \
+    PGREP_TAILSCALE_EXTENSION_EXIT=0 \
+    run_install_env "$workspace" --interface utun7 2>&1
+  )"; then
+    fail "install should reject simultaneous CLI and app-extension Tailscale backends"
+  fi
+  grep -Fq "competing identities and routes" <<<"$output" || fail "Expected install to explain the dual-backend conflict"
+  [[ ! -f "$workspace/pf.anchors/tailscale" ]] || fail "Dual-backend refusal must happen before writing the anchor"
+
+  if output="$(
+    PGREP_TAILSCALED_EXIT=0 \
+    PGREP_TAILSCALE_EXTENSION_EXIT=0 \
+    run_refresh_env "$workspace" --interface utun7 2>&1
+  )"; then
+    fail "refresh should reject simultaneous CLI and app-extension Tailscale backends"
+  fi
+  grep -Fq "Refusing to choose between competing interfaces" <<<"$output" || fail "Expected refresh to explain the dual-backend conflict"
+
+  if output="$(
+    PGREP_TAILSCALED_EXIT=0 \
+    PGREP_TAILSCALE_EXTENSION_EXIT=0 \
+    run_verify_env "$workspace" --interface utun7 --no-mullvad-check 2>&1
+  )"; then
+    fail "verify should reject simultaneous CLI and app-extension Tailscale backends"
+  fi
+  grep -Fq "Both CLI tailscaled and a macOS Tailscale app extension are active" <<<"$output" || fail "Expected verify to report the dual-backend conflict"
+
+  pass "install, refresh, and verify reject simultaneous Tailscale backends before trusting an interface override"
+}
+
 test_install_refuses_unmanaged_anchor_file() {
   local workspace
   workspace="$(new_workspace install-unmanaged-anchor)"
@@ -1895,6 +1934,7 @@ test_install_refuses_when_mullvad_expected_without_anchor
 test_uninstall_refuses_when_expected_mullvad_anchor_is_empty
 test_install_refuses_unknown_dynamic_anchor
 test_interface_detection_uses_exact_tailscale_identity
+test_scripts_reject_multiple_tailscale_backends
 test_install_refuses_unmanaged_anchor_file
 test_uninstall_removes_anchor_block_and_file
 test_verify_rejects_partial_pf_conf

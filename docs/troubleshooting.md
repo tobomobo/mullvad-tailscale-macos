@@ -200,6 +200,21 @@ sudo bash verify.sh \
 
 The installer is designed to be rerun and repairs the managed state instead of requiring a manual reinstall sequence.
 
+## Multiple Tailscale Backends Are Active
+
+Do not run the Homebrew `tailscaled` daemon and a Tailscale macOS app network extension at the same time. They can use different identities and `utun` interfaces, while the CLI, browser traffic, and PF rules each follow a different backend or route.
+
+Check for both backends:
+
+```bash
+pgrep -alf 'tailscaled|io.tailscale|IPNExtension'
+tailscale version --daemon
+```
+
+Choose either the CLI daemon or the macOS app, stop or remove the other one, and rerun `sudo bash install.sh`. The installer and watcher refuse this ambiguous state, and `verify.sh` reports it as a failure even when `--interface` is supplied.
+
+Disable or remove app extensions through System Settings or the owning app. Do not disable System Integrity Protection or manually delete files under `/Library/SystemExtensions`.
+
 ## Useful Diagnostic Bundle
 
 These commands are read-only except for the final network requests:

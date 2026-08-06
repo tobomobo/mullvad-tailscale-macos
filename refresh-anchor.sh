@@ -60,6 +60,9 @@ if interface="$(detect_tailscale_interface)"; then
 else
   detect_status=$?
   if [[ "$detect_status" -eq 2 ]]; then
+    die "Both CLI tailscaled and a macOS Tailscale app extension are active. Refusing to choose between competing interfaces; stop or remove one backend. See docs/troubleshooting.md#multiple-tailscale-backends-are-active."
+  fi
+  if [[ "$detect_status" -eq 3 ]]; then
     die "Multiple utun interfaces carry Tailscale's IPv6 ULA prefix and the Tailscale CLI is unavailable; refusing to guess. Rerun with --interface utunX or check for a second Tailscale backend."
   fi
   log_routine "No active Tailscale utun interface detected; leaving the anchor unchanged."
