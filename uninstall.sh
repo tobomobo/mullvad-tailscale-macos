@@ -22,10 +22,6 @@ if [[ -f "$ANCHOR_FILE" ]]; then
   anchor_file_managed_by_repo "$ANCHOR_FILE" || die "$ANCHOR_FILE exists but is not a recognized repo-managed anchor. Refusing to remove or detach it."
 fi
 
-echo "Removing the automatic PF watcher ..."
-/bin/bash "$SCRIPT_DIR/uninstall-pf-watcher.sh"
-echo ""
-
 tmp_pf_conf="$(make_temp_file pf-conf)"
 trap 'rm -f "$tmp_pf_conf"' EXIT
 
@@ -47,6 +43,12 @@ if [[ -f "$ANCHOR_FILE" ]]; then
 else
   echo "Anchor file $ANCHOR_FILE not found, skipping."
 fi
+
+# Last, so a refused PF reload above leaves the exception and its watcher
+# both in place rather than an unwatched exception.
+echo ""
+echo "Removing the automatic PF watcher ..."
+/bin/bash "$SCRIPT_DIR/uninstall-pf-watcher.sh"
 
 echo ""
 echo "Done. Tailscale anchor has been removed."

@@ -19,7 +19,7 @@ log_routine() {
 # errors to the unified log. Messages name interfaces and anchors, never
 # tailnet addresses.
 die() {
-  logger -t pf-watcher -- "pf-watcher: $*" 2>/dev/null || true
+  logger -t mullvad-tailscale-macos -- "mullvad-tailscale-macos pf-watcher: $*" 2>/dev/null || true
   echo "Error: $*" >&2
   exit 1
 }

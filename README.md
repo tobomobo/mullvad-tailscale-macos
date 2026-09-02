@@ -73,7 +73,7 @@ Start with `sudo bash verify.sh`, then use the matching guide:
 
 | Symptom | Next step |
 | --- | --- |
-| Installer refuses to flush a PF anchor such as `com.apple.internet-sharing` | Quit VM or container apps (Parallels, Docker Desktop, OrbStack, UTM) or disable Internet Sharing, then rerun; see [runtime PF anchors](docs/troubleshooting.md#a-runtime-pf-anchor-blocks-the-reload) |
+| Installer refuses to flush a PF anchor such as `com.apple.internet-sharing` | Quit apps that use macOS shared networking (for example Parallels, Docker Desktop, OrbStack, UTM) or turn off Internet Sharing, then rerun; see [runtime PF anchors](docs/troubleshooting.md#a-runtime-pf-anchor-blocks-the-reload) |
 | Installer reports multiple active Tailscale backends | Keep either the CLI daemon or macOS app extension; see [multiple Tailscale backends](docs/troubleshooting.md#multiple-tailscale-backends-are-active) |
 | Tailscale interface cannot be detected | Start Tailscale, then rerun `sudo bash install.sh` |
 | PF anchor is missing, detached, or in the wrong order | Rerun `sudo bash install.sh` |

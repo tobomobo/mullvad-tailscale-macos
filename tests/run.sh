@@ -1769,7 +1769,8 @@ anchor "mullvad" all
 anchor "other-vpn" all' run_install_env "$workspace" --interface utun7 2>&1)"; then
     fail "install should refuse to flush an unknown dynamic anchor"
   fi
-  grep -Fq "Another firewall or VPN product attached 'other-vpn'" <<<"$output" || fail "Expected a hint for an unknown third-party anchor, got: $output"
+  grep -Fq "'other-vpn' was attached to the live ruleset by software this repo does not recognize" <<<"$output" || fail "Expected a hint for an unknown third-party anchor, got: $output"
+  grep -Fq "Do not stop a security product" <<<"$output" || fail "Expected the unknown-anchor hint to warn against stopping a security product"
 
   assert_file_not_contains "$workspace/pf.conf" 'anchor "tailscale"'
   pass "install refuses to flush unknown dynamic PF attachments"
@@ -1790,7 +1791,7 @@ anchor "mullvad" all' run_install_env "$workspace" --interface utun7 2>&1)"; the
     fail "install should refuse to flush the macOS internet-sharing anchor"
   fi
   grep -Fq "refusing to flush it" <<<"$output" || fail "Expected the refusal line, got: $output"
-  grep -Fq "Parallels Desktop, Docker Desktop, OrbStack, and UTM" <<<"$output" || fail "Expected install to name the apps that create the anchor, got: $output"
+  grep -Fq "for example Parallels Desktop, Docker Desktop, OrbStack, or UTM" <<<"$output" || fail "Expected install to name example apps that use shared networking, got: $output"
   grep -Fq "docs/troubleshooting.md#a-runtime-pf-anchor-blocks-the-reload" <<<"$output" || fail "Expected install to link the troubleshooting entry"
   assert_file_not_contains "$workspace/pf.conf" 'anchor "tailscale"'
 
@@ -1806,15 +1807,50 @@ pass in quick on utun7 inet from 100.64.0.0/10 to any no state
 pass out quick on utun7 inet6 from any to fd7a:115c:a1e0::/48 no state
 pass in quick on utun7 inet6 from fd7a:115c:a1e0::/48 to any no state
 EOF
+  run_pf_watcher_install_env "$workspace" >/dev/null
   if output="$(PFCTL_MAIN_RULES='anchor "com.apple.internet-sharing" all
 anchor "tailscale" all
 anchor "mullvad" all' run_uninstall_env "$workspace" 2>&1)"; then
     fail "uninstall should refuse to flush the macOS internet-sharing anchor"
   fi
-  grep -Fq "Parallels Desktop, Docker Desktop, OrbStack, and UTM" <<<"$output" || fail "Expected uninstall to name the apps that create the anchor, got: $output"
+  grep -Fq "for example Parallels Desktop, Docker Desktop, OrbStack, or UTM" <<<"$output" || fail "Expected uninstall to name example apps that use shared networking, got: $output"
   assert_file_contains "$workspace/pf.conf" 'anchor "tailscale"'
   [[ -f "$workspace/pf.anchors/tailscale" ]] || fail "Expected the anchor file to survive a refused uninstall"
+  [[ -f "$workspace/com.mullvad-tailscale-macos.pf-watcher.plist" ]] || fail "Expected the watcher plist to survive a refused uninstall"
+  [[ -d "$workspace/watcher" ]] || fail "Expected the watcher payload to survive a refused uninstall"
+  assert_file_not_contains "$workspace/logs/launchctl.calls" "bootout system/com.mullvad-tailscale-macos.pf-watcher"
   pass "install and uninstall explain the macOS runtime anchor and leave state untouched"
+}
+
+test_refresh_logs_runtime_anchor_refusal() {
+  local workspace
+  local status=0
+  workspace="$(new_workspace refresh-runtime-anchor)"
+
+  cat > "$workspace/pf.conf" <<EOF
+set skip on lo0
+$ANCHOR_COMMENT
+anchor "tailscale"
+load anchor "tailscale" from "$workspace/pf.anchors/tailscale"
+EOF
+  cat > "$workspace/pf.anchors/tailscale" <<'EOF'
+pass out quick on utun7 inet from any to 100.64.0.0/10 no state
+pass in quick on utun7 inet from 100.64.0.0/10 to any no state
+pass out quick on utun7 inet6 from any to fd7a:115c:a1e0::/48 no state
+pass in quick on utun7 inet6 from fd7a:115c:a1e0::/48 to any no state
+EOF
+  cat > "$workspace/ifconfig/utun7" <<'EOF'
+utun7: flags=8051<UP,POINTOPOINT,RUNNING,MULTICAST> mtu 1280
+	inet 100.82.1.2 --> 100.82.1.2 netmask 0xffffffff
+EOF
+
+  IFCONFIG_LIST="lo0 utun7"     PFCTL_MAIN_RULES='anchor "com.apple.internet-sharing" all
+anchor "mullvad" all'     run_refresh_env "$workspace" >/dev/null 2>&1 || status=$?
+  [[ "$status" -ne 0 ]] || fail "refresh repair should refuse to flush the macOS internet-sharing anchor"
+  [[ ! -f "$workspace/logs/last-reloaded.conf" ]] || fail "Refused repair must not reload the main ruleset"
+  assert_file_contains "$workspace/logs/logger.calls" "refusing to flush it"
+  assert_file_contains "$workspace/logs/logger.calls" "for example Parallels Desktop, Docker Desktop, OrbStack, or UTM"
+  pass "watcher repair path logs the runtime-anchor explanation to the unified log"
 }
 
 test_interface_detection_uses_exact_tailscale_identity() {
@@ -1997,6 +2033,7 @@ test_install_refuses_when_mullvad_expected_without_anchor
 test_uninstall_refuses_when_expected_mullvad_anchor_is_empty
 test_install_refuses_unknown_dynamic_anchor
 test_install_and_uninstall_explain_apple_runtime_anchor
+test_refresh_logs_runtime_anchor_refusal
 test_interface_detection_uses_exact_tailscale_identity
 test_scripts_reject_multiple_tailscale_backends
 test_install_refuses_unmanaged_anchor_file
