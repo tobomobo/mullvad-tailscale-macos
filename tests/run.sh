@@ -216,7 +216,7 @@ EOF
   cat > "$bin_dir/pgrep" <<'EOF'
 #!/bin/bash
 case "$*" in
-  *io.tailscale.ipn.macsys.network-extension*|*IPNExtension*)
+  *macsys*|*IPNExtension*)
     exit "${PGREP_TAILSCALE_EXTENSION_EXIT:-1}"
     ;;
   *tailscaled*)
@@ -260,6 +260,12 @@ EOF
 #!/bin/bash
 printf '%s\n' "$*" >> "$TEST_LOG_DIR/killall.calls"
 exit "${KILLALL_EXIT:-0}"
+EOF
+
+  cat > "$bin_dir/logger" <<'EOF'
+#!/bin/bash
+printf '%s\n' "$*" >> "$TEST_LOG_DIR/logger.calls"
+exit 0
 EOF
 
   cat > "$bin_dir/tailscale" <<'EOF'
@@ -1430,6 +1436,7 @@ EOF
   )" || status=$?
   [[ "$status" -ne 0 ]] || fail "refresh should fail loudly when several utuns carry the Tailscale ULA prefix"
   [[ "$output" == *"refusing to guess"* ]] || fail "Expected an ambiguity error, got: $output"
+  assert_file_contains "$workspace/logs/logger.calls" "refusing to guess"
   assert_file_not_contains "$workspace/logs/pfctl.calls" "-a tailscale -f"
   pass "refresh exits non-zero instead of guessing between ambiguous utuns"
 }
@@ -1810,6 +1817,17 @@ test_scripts_reject_multiple_tailscale_backends() {
     fail "refresh should reject simultaneous CLI and app-extension Tailscale backends"
   fi
   grep -Fq "Refusing to choose between competing interfaces" <<<"$output" || fail "Expected refresh to explain the dual-backend conflict"
+  assert_file_contains "$workspace/logs/logger.calls" "Refusing to choose between competing interfaces"
+
+  output="$(
+    PATH="$workspace/bin:/usr/bin:/bin" \
+    PGREP_TAILSCALED_EXIT=1 \
+    PGREP_TAILSCALE_EXTENSION_EXIT=0 \
+    TAILSCALE_INTERFACE=utun7 \
+    ROOT_DIR="$ROOT_DIR" \
+    bash -c 'source "$ROOT_DIR/lib/common.sh"; detect_tailscale_interface'
+  )" || fail "A lone macOS app extension must not be reported as a dual-backend conflict"
+  [[ "$output" == "utun7" ]] || fail "Expected the override interface with only the app extension running, got: $output"
 
   if output="$(
     PGREP_TAILSCALED_EXIT=0 \
@@ -1820,7 +1838,7 @@ test_scripts_reject_multiple_tailscale_backends() {
   fi
   grep -Fq "Both CLI tailscaled and a macOS Tailscale app extension are active" <<<"$output" || fail "Expected verify to report the dual-backend conflict"
 
-  pass "install, refresh, and verify reject simultaneous Tailscale backends before trusting an interface override"
+  pass "install, refresh, and verify reject simultaneous Tailscale backends; a single backend passes"
 }
 
 test_install_refuses_unmanaged_anchor_file() {
