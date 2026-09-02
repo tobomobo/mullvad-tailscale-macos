@@ -55,10 +55,16 @@ if [[ ! -f "$ANCHOR_TEMPLATE" ]]; then
   die "Cannot find anchor template at $ANCHOR_TEMPLATE"
 fi
 
-interface="$(detect_tailscale_interface)" || {
+if interface="$(detect_tailscale_interface)"; then
+  :
+else
+  detect_status=$?
+  if [[ "$detect_status" -eq 2 ]]; then
+    die "Multiple utun interfaces carry Tailscale's IPv6 ULA prefix and the Tailscale CLI is unavailable; refusing to guess. Rerun with --interface utunX or check for a second Tailscale backend."
+  fi
   log_routine "No active Tailscale utun interface detected; leaving the anchor unchanged."
   exit 0
-}
+fi
 
 installed_interface=""
 if [[ -f "$ANCHOR_FILE" ]]; then
@@ -66,8 +72,18 @@ if [[ -f "$ANCHOR_FILE" ]]; then
   installed_interface="$(anchor_interface_from_file "$ANCHOR_FILE" 2>/dev/null || true)"
 fi
 
-runtime_rules="$("$PFCTL_BIN" -a "$TAILSCALE_ANCHOR_NAME" -sr 2>/dev/null || true)"
-mullvad_pf_protection_is_consistent || die "Mullvad reports active protection, but its PF anchor is missing or empty. Refusing to attach the Tailscale exception."
+runtime_rules="$(pfctl -a "$TAILSCALE_ANCHOR_NAME" -sr 2>/dev/null || true)"
+if ! mullvad_pf_protection_is_consistent; then
+  if ! command -v mullvad >/dev/null 2>&1; then
+    # Under launchd the Mullvad CLI is usually not on PATH. Without it, an
+    # active non-empty Mullvad PF anchor is the only evidence that a kill
+    # switch is enforced; when it is absent there is nothing to keep open, so
+    # this is a routine no-op rather than a fault.
+    log_routine "The Mullvad CLI is unavailable and the main PF ruleset carries no active Mullvad anchor; leaving the anchor unchanged."
+    exit 0
+  fi
+  die "Mullvad reports active protection, but its PF anchor is missing or empty. Refusing to attach the Tailscale exception."
+fi
 main_anchor_call_safe=0
 if tailscale_main_anchor_call_is_safe; then
   main_anchor_call_safe=1
@@ -88,7 +104,7 @@ pf_conf_reloaded=0
 trap 'rm -f "$tmp_anchor" "$old_anchor" "$tmp_pf_conf"' EXIT
 
 if [[ -f "$ANCHOR_FILE" ]]; then
-  "$CP_BIN" "$ANCHOR_FILE" "$old_anchor"
+  cp "$ANCHOR_FILE" "$old_anchor"
   anchor_existed=1
 fi
 
@@ -104,7 +120,7 @@ restore_previous_anchor_state() {
     install_root_owned_file "$old_anchor" "$ANCHOR_FILE" || failed=1
     load_runtime_anchor "$ANCHOR_FILE" || failed=1
   else
-    "$RM_BIN" -f "$ANCHOR_FILE" || failed=1
+    rm -f "$ANCHOR_FILE" || failed=1
     flush_runtime_anchor || failed=1
   fi
   return "$failed"
@@ -115,12 +131,12 @@ validate_anchor_policy_file "$tmp_anchor" "$interface" || die "Rendered anchor f
 
 install_root_owned_file "$tmp_anchor" "$ANCHOR_FILE"
 if [[ "$main_anchor_call_safe" -eq 0 ]]; then
-  "$CP_BIN" "$PF_CONF" "$tmp_pf_conf"
+  cp "$PF_CONF" "$tmp_pf_conf"
   validate_pf_conf "$tmp_pf_conf" || {
     if [[ "$anchor_existed" -eq 1 ]]; then
       install_root_owned_file "$old_anchor" "$ANCHOR_FILE"
     else
-      "$RM_BIN" -f "$ANCHOR_FILE"
+      rm -f "$ANCHOR_FILE"
     fi
     die "Existing managed pf.conf failed validation; restored the previous anchor file."
   }

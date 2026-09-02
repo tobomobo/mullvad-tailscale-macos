@@ -1,55 +1,36 @@
 #!/bin/bash
 
-TAILSCALE_ANCHOR_NAME="${TAILSCALE_ANCHOR_NAME:-tailscale}"
+TAILSCALE_ANCHOR_NAME="tailscale"
 ANCHOR_FILE="${ANCHOR_FILE:-/etc/pf.anchors/tailscale}"
 PF_CONF="${PF_CONF:-/etc/pf.conf}"
-ANCHOR_TEMPLATE="${ANCHOR_TEMPLATE:-$SCRIPT_DIR/etc/pf.anchors/tailscale}"
+ANCHOR_TEMPLATE="$SCRIPT_DIR/etc/pf.anchors/tailscale"
 
-PFCTL_BIN="${PFCTL_BIN:-pfctl}"
-IFCONFIG_BIN="${IFCONFIG_BIN:-ifconfig}"
-TAILSCALE_BIN="${TAILSCALE_BIN:-tailscale}"
-MULLVAD_BIN="${MULLVAD_BIN:-mullvad}"
-PGREP_BIN="${PGREP_BIN:-pgrep}"
-CURL_BIN="${CURL_BIN:-curl}"
-DIG_BIN="${DIG_BIN:-dig}"
-DSCACHEUTIL_BIN="${DSCACHEUTIL_BIN:-dscacheutil}"
-SCUTIL_BIN="${SCUTIL_BIN:-scutil}"
-KILLALL_BIN="${KILLALL_BIN:-killall}"
-LAUNCHCTL_BIN="${LAUNCHCTL_BIN:-launchctl}"
-PLUTIL_BIN="${PLUTIL_BIN:-plutil}"
-CHOWN_BIN="${CHOWN_BIN:-chown}"
+# Every other tool is resolved through PATH. These two are pinned to their
+# absolute macOS paths because a PATH-shadowed chmod or stat would silently
+# defeat the ACL stripping and permission checks on privileged files.
 CHMOD_BIN="${CHMOD_BIN:-/bin/chmod}"
 STAT_BIN="${STAT_BIN:-/usr/bin/stat}"
-CP_BIN="${CP_BIN:-cp}"
-RM_BIN="${RM_BIN:-rm}"
-CMP_BIN="${CMP_BIN:-cmp}"
-DATE_BIN="${DATE_BIN:-date}"
-MKDIR_BIN="${MKDIR_BIN:-mkdir}"
-FIND_BIN="${FIND_BIN:-find}"
 HOSTS_FILE="${HOSTS_FILE:-/etc/hosts}"
 RESOLVER_DIR="${RESOLVER_DIR:-/etc/resolver}"
 
-TAILSCALED_DAEMON_LABEL="${TAILSCALED_DAEMON_LABEL:-com.tailscale.tailscaled}"
+TAILSCALED_DAEMON_LABEL="com.tailscale.tailscaled"
 TAILSCALED_DAEMON_PLIST="${TAILSCALED_DAEMON_PLIST:-/Library/LaunchDaemons/com.tailscale.tailscaled.plist}"
 TAILSCALED_MANAGED_BIN="${TAILSCALED_MANAGED_BIN:-/Library/PrivilegedHelperTools/mullvad-tailscale-macos.tailscaled}"
-TAILSCALED_STDOUT_PATH="${TAILSCALED_STDOUT_PATH:-/dev/null}"
-TAILSCALED_STDERR_PATH="${TAILSCALED_STDERR_PATH:-/dev/null}"
-LEGACY_TAILSCALED_STDOUT_PATH="${LEGACY_TAILSCALED_STDOUT_PATH:-/var/log/tailscaled.log}"
-LEGACY_TAILSCALED_STDERR_PATH="${LEGACY_TAILSCALED_STDERR_PATH:-/var/log/tailscaled.err}"
+# Routine daemon output is discarded so the tailnet leaves no metadata trail on
+# disk; verify.sh asserts both plists still point at /dev/null.
+MANAGED_DAEMON_LOG="/dev/null"
 
-PF_WATCHER_LABEL="${PF_WATCHER_LABEL:-com.mullvad-tailscale-macos.pf-watcher}"
+PF_WATCHER_LABEL="com.mullvad-tailscale-macos.pf-watcher"
 PF_WATCHER_PLIST="${PF_WATCHER_PLIST:-/Library/LaunchDaemons/com.mullvad-tailscale-macos.pf-watcher.plist}"
 PF_WATCHER_INSTALL_DIR="${PF_WATCHER_INSTALL_DIR:-/Library/Application Support/mullvad-tailscale-macos}"
-PF_WATCHER_SCRIPT="${PF_WATCHER_SCRIPT:-$PF_WATCHER_INSTALL_DIR/refresh-anchor.sh}"
-PF_WATCHER_LOG="${PF_WATCHER_LOG:-/dev/null}"
-LEGACY_PF_WATCHER_LOG="${LEGACY_PF_WATCHER_LOG:-/var/log/mullvad-tailscale-pf-watcher.log}"
-PF_WATCHER_INTERVAL="${PF_WATCHER_INTERVAL:-120}"
-PF_WATCHER_MARKER_FILE="${PF_WATCHER_MARKER_FILE:-$PF_WATCHER_INSTALL_DIR/.managed-by-mullvad-tailscale-macos}"
+PF_WATCHER_SCRIPT="$PF_WATCHER_INSTALL_DIR/refresh-anchor.sh"
+PF_WATCHER_INTERVAL=120
+PF_WATCHER_MARKER_FILE="$PF_WATCHER_INSTALL_DIR/.managed-by-mullvad-tailscale-macos"
 
 TAILSCALE_IPV4_RANGE="100.64.0.0/10"
 TAILSCALE_IPV6_RANGE="fd7a:115c:a1e0::/48"
-TAILSCALE_MAGICDNS_SERVER="${TAILSCALE_MAGICDNS_SERVER:-100.100.100.100}"
-MULLVAD_ANCHOR_NAME="${MULLVAD_ANCHOR_NAME:-mullvad}"
+TAILSCALE_MAGICDNS_SERVER="100.100.100.100"
+MULLVAD_ANCHOR_NAME="mullvad"
 
 # Mullvad's in-app content blockers point system DNS at 100.64.0.<bitmask>
 # (ads=1, trackers=2, malware=4, adult=8, gambling=16, social=32; max 63), which
@@ -69,6 +50,18 @@ die() {
   exit 1
 }
 
+# For scripts whose only option is --help. Calls the caller's usage().
+parse_help_only() {
+  if [[ $# -gt 0 ]]; then
+    if [[ "$1" == "--help" || "$1" == "-h" ]]; then
+      usage
+      exit 0
+    fi
+    usage >&2
+    exit 1
+  fi
+}
+
 require_root() {
   if [[ "${SKIP_ROOT_CHECK:-0}" == "1" ]]; then
     return 0
@@ -81,10 +74,6 @@ require_root() {
 
 running_as_root() {
   [[ $EUID -eq 0 || "${SKIP_ROOT_CHECK:-0}" == "1" ]]
-}
-
-timestamp() {
-  "$DATE_BIN" +%Y%m%d%H%M%S
 }
 
 make_temp_file() {
@@ -103,13 +92,6 @@ validate_tailnet_domain() {
   [[ "$domain" == *.ts.net ]]
 }
 
-validate_nameserver_ip() {
-  local nameserver="$1"
-
-  [[ -n "$nameserver" ]] || return 1
-  [[ "$nameserver" =~ ^[0-9A-Fa-f:.]+$ ]]
-}
-
 has_exact_line() {
   local file="$1"
   local line="$2"
@@ -118,19 +100,30 @@ has_exact_line() {
 }
 
 count_exact_line() {
-  local file="$1"
-  local line="$2"
+  local count
 
-  [[ -f "$file" ]] || {
-    echo 0
-    return 0
-  }
-
-  grep -Fxc -- "$line" "$file" || true
+  # grep -c exits 1 while still printing "0", and exits 2 on a missing file.
+  count="$(grep -Fxc -- "$2" "$1" 2>/dev/null)" || count=0
+  echo "$count"
 }
 
-extract_ip_lines() {
-  awk '
+join_lines() {
+  local separator="${2:-, }"
+
+  awk -v sep="$separator" 'NF { out = out ? out sep $0 : $0 } END { print out }' <<<"$1"
+}
+
+list_has_common_line() {
+  local first="$1"
+  local second="$2"
+
+  grep -Fxq -f <(grep -v '^$' <<<"$first") <<<"$second"
+}
+
+direct_magicdns_lookup() {
+  local hostname="$1"
+
+  { dig +short @"$TAILSCALE_MAGICDNS_SERVER" "$hostname" 2>/dev/null || true; } | awk '
     /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/ || /^[0-9A-Fa-f:]+$/ {
       if (!seen[$0]++) {
         print $0
@@ -139,43 +132,10 @@ extract_ip_lines() {
   '
 }
 
-join_lines() {
-  local data="$1"
-  local separator="${2:-, }"
-
-  awk -v separator="$separator" '
-    NF {
-      output = output ? output separator $0 : $0
-    }
-    END {
-      print output
-    }
-  ' <<<"$data"
-}
-
-list_has_common_line() {
-  local first="$1"
-  local second="$2"
-  local line
-
-  while IFS= read -r line; do
-    [[ -n "$line" ]] || continue
-    grep -Fqx -- "$line" <<<"$second" && return 0
-  done <<<"$first"
-
-  return 1
-}
-
-direct_magicdns_lookup() {
-  local hostname="$1"
-
-  { "$DIG_BIN" +short @"$TAILSCALE_MAGICDNS_SERVER" "$hostname" 2>/dev/null || true; } | extract_ip_lines
-}
-
 system_resolver_lookup() {
   local hostname="$1"
 
-  { "$DSCACHEUTIL_BIN" -q host -a name "$hostname" 2>/dev/null || true; } | awk '
+  { dscacheutil -q host -a name "$hostname" 2>/dev/null || true; } | awk '
     /^ip_address: / {
       if (!seen[$2]++) {
         print $2
@@ -207,34 +167,15 @@ hosts_file_lookup() {
   ' "$file" 2>/dev/null || true
 }
 
-system_dns_servers() {
-  "$SCUTIL_BIN" --dns 2>/dev/null | awk '
+mullvad_blocker_dns_in_use() {
+  scutil --dns 2>/dev/null | awk '
     /nameserver\[[0-9]+\]/ {
       ip = $NF
       if (ip ~ /^[0-9A-Fa-f:.]+$/ && !seen[ip]++) {
         print ip
       }
     }
-  '
-}
-
-dns_server_is_mullvad_blocker() {
-  local ip="$1"
-
-  [[ "$ip" =~ $MULLVAD_BLOCKER_DNS_REGEX ]]
-}
-
-mullvad_blocker_dns_in_use() {
-  local ip
-
-  while IFS= read -r ip; do
-    [[ -n "$ip" ]] || continue
-    if dns_server_is_mullvad_blocker "$ip"; then
-      echo "$ip"
-    fi
-  done < <(system_dns_servers)
-
-  return 0
+  ' | grep -E "$MULLVAD_BLOCKER_DNS_REGEX" || true
 }
 
 detect_tailscale_interface() {
@@ -246,20 +187,20 @@ detect_tailscale_interface() {
 
   local iface
   local config
+  local detected_interface=""
   local tailscale_ipv4
   local tailscale_ipv6
 
-  tailscale_ipv4="$("$TAILSCALE_BIN" ip -4 2>/dev/null | awk 'NF { print $1; exit }')"
-  tailscale_ipv6="$("$TAILSCALE_BIN" ip -6 2>/dev/null | awk 'NF { print $1; exit }')"
+  tailscale_ipv4="$(tailscale ip -4 2>/dev/null | awk 'NF { print $1; exit }' || true)"
+  tailscale_ipv6="$(tailscale ip -6 2>/dev/null | awk 'NF { print $1; exit }' || true)"
 
   [[ "$tailscale_ipv4" =~ ^100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.[0-9]{1,3}\.[0-9]{1,3}$ ]] || tailscale_ipv4=""
   [[ "$tailscale_ipv6" =~ ^fd7a:115c:a1e0: ]] || tailscale_ipv6=""
-  [[ -n "$tailscale_ipv4" || -n "$tailscale_ipv6" ]] || return 1
 
-  for iface in $("$IFCONFIG_BIN" -l 2>/dev/null || true); do
+  for iface in $(ifconfig -l 2>/dev/null || true); do
     [[ "$iface" == utun* ]] || continue
 
-    config="$("$IFCONFIG_BIN" "$iface" 2>/dev/null || true)"
+    config="$(ifconfig "$iface" 2>/dev/null || true)"
     if [[ -n "$tailscale_ipv4" ]] && awk -v ip="$tailscale_ipv4" '$1 == "inet" && $2 == ip { found=1 } END { exit !found }' <<<"$config"; then
       echo "$iface"
       return 0
@@ -268,9 +209,17 @@ detect_tailscale_interface() {
       echo "$iface"
       return 0
     fi
+    if [[ -z "$tailscale_ipv4" && -z "$tailscale_ipv6" ]] && \
+      awk '$1 == "inet6" { sub(/%.*/, "", $2); if ($2 ~ /^fd7a:115c:a1e0:/) found=1 } END { exit !found }' <<<"$config"; then
+      # Exit 2 marks an ambiguous match so callers can fail loudly instead of
+      # treating it like "Tailscale is not running".
+      [[ -z "$detected_interface" ]] || return 2
+      detected_interface="$iface"
+    fi
   done
 
-  return 1
+  [[ -n "$detected_interface" ]] || return 1
+  echo "$detected_interface"
 }
 
 anchor_interface_from_file() {
@@ -338,20 +287,11 @@ print_anchor_runtime_mismatch() {
 
 anchor_file_managed_by_repo() {
   local file="$1"
-  local interface
 
+  # The ownership marker is advisory: adoption is decided purely by the file
+  # containing the exact known narrow policy and nothing else.
   [[ -f "$file" ]] || return 1
-  interface="$(anchor_interface_from_file "$file" 2>/dev/null || true)"
-  [[ -n "$interface" ]] || return 1
-
-  if has_exact_line "$file" "$MANAGED_FILE_COMMENT"; then
-    anchor_policy_file_is_exact "$file" "$interface"
-    return
-  fi
-
-  # Legacy releases lacked the marker. Accept only the exact known narrow policy
-  # so existing repo installs can be migrated without adopting arbitrary files.
-  anchor_policy_file_is_exact "$file" "$interface"
+  anchor_policy_file_is_exact "$file" "$(anchor_interface_from_file "$file" 2>/dev/null || true)"
 }
 
 render_anchor_template() {
@@ -392,22 +332,16 @@ managed_anchor_block_is_exact() {
   comment_count="$(count_exact_line "$file" "$ANCHOR_COMMENT")"
   [[ "$comment_count" == "0" || "$comment_count" == "1" ]] || return 1
 
-  if [[ "$comment_count" == "1" ]]; then
-    awk -v comment="$ANCHOR_COMMENT" -v anchor="$ANCHOR_LINE" -v load="$LOAD_LINE" '
-      $0 == comment { state=1; next }
-      state == 1 && $0 == anchor { state=2; next }
+  # The managed lines must be contiguous, and must follow the comment when one
+  # is present.
+  awk -v want_comment="$comment_count" \
+    -v comment="$ANCHOR_COMMENT" -v anchor="$ANCHOR_LINE" -v load="$LOAD_LINE" '
+      want_comment && $0 == comment { state=1; next }
+      $0 == anchor && (!want_comment || state == 1) { state=2; next }
       state == 2 && $0 == load { found=1; state=0; next }
       state { state=0 }
       END { exit !found }
     ' "$file"
-  else
-    awk -v anchor="$ANCHOR_LINE" -v load="$LOAD_LINE" '
-      $0 == anchor { state=1; next }
-      state == 1 && $0 == load { found=1; state=0; next }
-      state { state=0 }
-      END { exit !found }
-    ' "$file"
-  fi
 }
 
 remove_anchor_block() {
@@ -427,14 +361,14 @@ file_differs() {
   local first="$1"
   local second="$2"
 
-  ! "$CMP_BIN" -s "$first" "$second"
+  ! cmp -s "$first" "$second"
 }
 
 backup_file() {
   local file="$1"
-  local backup_path="${file}.bak.$(timestamp)"
+  local backup_path="${file}.bak.$(date +%Y%m%d%H%M%S)"
 
-  "$CP_BIN" "$file" "$backup_path"
+  cp "$file" "$backup_path"
   echo "$backup_path"
 }
 
@@ -443,8 +377,8 @@ install_root_owned_file() {
   local destination_file="$2"
   local file_mode="${3:-644}"
 
-  "$CP_BIN" "$source_file" "$destination_file"
-  "$CHOWN_BIN" root:wheel "$destination_file"
+  cp "$source_file" "$destination_file"
+  chown root:wheel "$destination_file"
   "$CHMOD_BIN" -N "$destination_file"
   "$CHMOD_BIN" "$file_mode" "$destination_file"
 }
@@ -453,40 +387,35 @@ install_root_owned_dir() {
   local dir="$1"
   local dir_mode="${2:-755}"
 
-  "$MKDIR_BIN" -p "$dir"
-  "$CHOWN_BIN" root:wheel "$dir"
+  mkdir -p "$dir"
+  chown root:wheel "$dir"
   "$CHMOD_BIN" "$dir_mode" "$dir"
-}
-
-validate_anchor_file() {
-  local file="$1"
-
-  "$PFCTL_BIN" -n -a "$TAILSCALE_ANCHOR_NAME" -f "$file" >/dev/null 2>&1
 }
 
 validate_anchor_policy_file() {
   local file="$1"
   local interface="$2"
 
-  anchor_policy_file_is_exact "$file" "$interface" && validate_anchor_file "$file"
+  anchor_policy_file_is_exact "$file" "$interface" && \
+    pfctl -n -a "$TAILSCALE_ANCHOR_NAME" -f "$file" >/dev/null 2>&1
 }
 
 validate_pf_conf() {
   local file="$1"
 
-  "$PFCTL_BIN" -n -f "$file" >/dev/null 2>&1
+  pfctl -n -f "$file" >/dev/null 2>&1
 }
 
 load_runtime_anchor() {
   local file="$1"
 
-  "$PFCTL_BIN" -a "$TAILSCALE_ANCHOR_NAME" -f "$file" >/dev/null 2>&1
+  pfctl -a "$TAILSCALE_ANCHOR_NAME" -f "$file" >/dev/null 2>&1
 }
 
 pf_main_anchor_calls() {
   local rules
 
-  rules="$("$PFCTL_BIN" -sr 2>/dev/null)" || return 1
+  rules="$(pfctl -sr 2>/dev/null)" || return 1
   awk '$1 == "anchor" {
     name=$2
     gsub(/^"|"$/, "", name)
@@ -496,13 +425,8 @@ pf_main_anchor_calls() {
 
 pf_main_anchor_is_called() {
   local anchor="$1"
-  local anchor_calls
+  local anchor_calls="$2"
 
-  if [[ $# -ge 2 ]]; then
-    anchor_calls="$2"
-  else
-    anchor_calls="$(pf_main_anchor_calls)" || return 1
-  fi
   grep -Fqx -- "$anchor" <<<"$anchor_calls"
 }
 
@@ -521,23 +445,18 @@ pf_anchor_call_list_contains_all() {
 pf_anchor_rules() {
   local anchor="$1"
 
-  "$PFCTL_BIN" -a "$anchor" -sr 2>/dev/null
+  pfctl -a "$anchor" -sr 2>/dev/null
 }
 
 pf_is_enabled() {
-  "$PFCTL_BIN" -s info 2>/dev/null | grep -Eq '^Status:[[:space:]]+Enabled([[:space:]]|$)'
+  pfctl -s info 2>/dev/null | grep -Eq '^Status:[[:space:]]+Enabled([[:space:]]|$)'
 }
 
 pf_anchor_precedes() {
   local first="$1"
   local second="$2"
-  local anchor_calls
+  local anchor_calls="$3"
 
-  if [[ $# -ge 3 ]]; then
-    anchor_calls="$3"
-  else
-    anchor_calls="$(pf_main_anchor_calls)" || return 1
-  fi
   awk -v first="$first" -v second="$second" '
     $0 == first && !first_line { first_line=NR }
     $0 == second && !second_line { second_line=NR }
@@ -599,11 +518,11 @@ plist_discards_standard_streams() {
 }
 
 mullvad_status() {
-  "$MULLVAD_BIN" status 2>/dev/null
+  mullvad status 2>/dev/null
 }
 
 mullvad_lockdown_status() {
-  "$MULLVAD_BIN" lockdown-mode get 2>/dev/null
+  mullvad lockdown-mode get 2>/dev/null
 }
 
 mullvad_status_is_connected() {
@@ -631,7 +550,9 @@ mullvad_pf_protection_is_consistent() {
   local anchor_calls
   local rules
 
-  mullvad_protection_is_expected || return 0
+  if ! mullvad_protection_is_expected && command -v mullvad >/dev/null 2>&1; then
+    return 0
+  fi
   anchor_calls="$(pf_main_anchor_calls)" || return 1
   pf_main_anchor_is_called "$MULLVAD_ANCHOR_NAME" "$anchor_calls" || return 1
   rules="$(pf_anchor_rules "$MULLVAD_ANCHOR_NAME")" || return 1
@@ -656,31 +577,31 @@ restore_pf_conf_and_runtime() {
   local anchor_calls_after
 
   rollback_conf="$(make_temp_file pf-rollback-conf)"
-  "$CP_BIN" "$previous_conf" "$PF_CONF"
+  cp "$previous_conf" "$PF_CONF"
   if [[ "$preserve_mullvad" -eq 1 ]]; then
     append_runtime_mullvad_anchor "$previous_conf" "$rollback_conf"
   else
-    "$CP_BIN" "$previous_conf" "$rollback_conf"
+    cp "$previous_conf" "$rollback_conf"
   fi
 
   if ! validate_pf_conf "$rollback_conf" || ! reload_pf_conf "$rollback_conf"; then
-    "$RM_BIN" -f "$rollback_conf"
+    rm -f "$rollback_conf"
     return 1
   fi
 
   anchor_calls_after="$(pf_main_anchor_calls 2>/dev/null || true)"
   if ! pf_anchor_call_list_contains_all "$anchor_calls_before" "$anchor_calls_after"; then
-    "$RM_BIN" -f "$rollback_conf"
+    rm -f "$rollback_conf"
     return 1
   fi
 
   if [[ "$preserve_mullvad" -eq 1 ]] && \
     [[ "$(pf_anchor_rules "$MULLVAD_ANCHOR_NAME" 2>/dev/null || true)" != "$mullvad_rules_before" ]]; then
-    "$RM_BIN" -f "$rollback_conf"
+    rm -f "$rollback_conf"
     return 1
   fi
 
-  "$RM_BIN" -f "$rollback_conf"
+  rm -f "$rollback_conf"
 }
 
 pf_conf_covers_anchor() {
@@ -702,7 +623,7 @@ pf_conf_covers_anchor() {
 reload_pf_conf() {
   local file="$1"
 
-  "$PFCTL_BIN" -f "$file" >/dev/null 2>&1
+  pfctl -f "$file" >/dev/null 2>&1
 }
 
 apply_pf_conf_update() {
@@ -750,24 +671,24 @@ apply_pf_conf_update() {
   if [[ "$preserve_mullvad" -eq 1 ]]; then
     append_runtime_mullvad_anchor "$new_conf" "$runtime_conf"
     validate_pf_conf "$runtime_conf" || {
-      "$RM_BIN" -f "$runtime_conf"
+      rm -f "$runtime_conf"
       echo "Runtime PF config with Mullvad preservation failed validation." >&2
       return 1
     }
   else
-    "$CP_BIN" "$new_conf" "$runtime_conf"
+    cp "$new_conf" "$runtime_conf"
   fi
 
   backup_path="$(backup_file "$PF_CONF")"
-  "$CP_BIN" "$new_conf" "$PF_CONF"
+  cp "$new_conf" "$PF_CONF"
 
   if ! reload_pf_conf "$runtime_conf"; then
     if ! restore_pf_conf_and_runtime "$backup_path" "$anchor_calls_before" "$preserve_mullvad" "$mullvad_rules_before"; then
-      "$RM_BIN" -f "$runtime_conf"
+      rm -f "$runtime_conf"
       echo "CRITICAL: the PF reload failed and the previous runtime ruleset could not be re-established. Disconnect this Mac from untrusted networks and reapply Mullvad immediately." >&2
       return 1
     fi
-    "$RM_BIN" -f "$runtime_conf"
+    rm -f "$runtime_conf"
     echo "Reload failed; restored the previous file and runtime PF ruleset." >&2
     return 1
   fi
@@ -787,20 +708,20 @@ apply_pf_conf_update() {
   if [[ "$postcheck_failed" -eq 1 ]]; then
     echo "A protected main PF anchor call or Mullvad's rules changed during reload; restoring the previous configuration." >&2
     if ! restore_pf_conf_and_runtime "$backup_path" "$anchor_calls_before" "$preserve_mullvad" "$mullvad_rules_before"; then
-      "$RM_BIN" -f "$runtime_conf"
+      rm -f "$runtime_conf"
       echo "CRITICAL: failed to restore the previous PF runtime ruleset. Disconnect this Mac from untrusted networks and reapply Mullvad immediately." >&2
       return 1
     fi
-    "$RM_BIN" -f "$runtime_conf"
+    rm -f "$runtime_conf"
     return 1
   fi
 
-  "$RM_BIN" -f "$runtime_conf"
+  rm -f "$runtime_conf"
   echo "$backup_path"
 }
 
 flush_runtime_anchor() {
-  "$PFCTL_BIN" -a "$TAILSCALE_ANCHOR_NAME" -F rules >/dev/null 2>&1
+  pfctl -a "$TAILSCALE_ANCHOR_NAME" -F rules >/dev/null 2>&1
 }
 
 detect_tailscaled_binary() {
@@ -833,9 +754,9 @@ ${MANAGED_PLIST_COMMENT}
     <key>KeepAlive</key>
     <true/>
     <key>StandardOutPath</key>
-    <string>${TAILSCALED_STDOUT_PATH}</string>
+    <string>${MANAGED_DAEMON_LOG}</string>
     <key>StandardErrorPath</key>
-    <string>${TAILSCALED_STDERR_PATH}</string>
+    <string>${MANAGED_DAEMON_LOG}</string>
 </dict>
 </plist>
 EOF
@@ -844,7 +765,7 @@ EOF
 validate_plist() {
   local file="$1"
 
-  "$PLUTIL_BIN" -lint "$file" >/dev/null 2>&1
+  plutil -lint "$file" >/dev/null 2>&1
 }
 
 write_pf_watcher_plist() {
@@ -874,9 +795,9 @@ ${MANAGED_PLIST_COMMENT}
         <string>/var/run/resolv.conf</string>
     </array>
     <key>StandardOutPath</key>
-    <string>${PF_WATCHER_LOG}</string>
+    <string>${MANAGED_DAEMON_LOG}</string>
     <key>StandardErrorPath</key>
-    <string>${PF_WATCHER_LOG}</string>
+    <string>${MANAGED_DAEMON_LOG}</string>
 </dict>
 </plist>
 EOF
@@ -888,54 +809,19 @@ plist_managed_by_repo() {
   has_exact_line "$file" "$MANAGED_PLIST_COMMENT"
 }
 
-legacy_pf_watcher_plist_managed_by_repo() {
-  local file="$1"
-
-  [[ -f "$file" ]] || return 1
-  grep -Fq "<string>${PF_WATCHER_LABEL}</string>" "$file" && \
-    grep -Fq "<string>${PF_WATCHER_SCRIPT}</string>" "$file"
-}
-
 pf_watcher_payload_managed_by_repo() {
-  [[ -f "$PF_WATCHER_MARKER_FILE" ]] && has_exact_line "$PF_WATCHER_MARKER_FILE" "$PF_WATCHER_MARKER_CONTENT"
-}
-
-legacy_pf_watcher_payload_managed_by_repo() {
-  local path
-
-  [[ -f "$PF_WATCHER_INSTALL_DIR/refresh-anchor.sh" ]] || return 1
-  [[ -f "$PF_WATCHER_INSTALL_DIR/lib/common.sh" ]] || return 1
-  [[ -f "$PF_WATCHER_INSTALL_DIR/etc/pf.anchors/tailscale" ]] || return 1
-
-  while IFS= read -r path; do
-    case "$path" in
-      "$PF_WATCHER_INSTALL_DIR/refresh-anchor.sh"|\
-      "$PF_WATCHER_INSTALL_DIR/lib"|\
-      "$PF_WATCHER_INSTALL_DIR/lib/common.sh"|\
-      "$PF_WATCHER_INSTALL_DIR/etc"|\
-      "$PF_WATCHER_INSTALL_DIR/etc/pf.anchors"|\
-      "$PF_WATCHER_INSTALL_DIR/etc/pf.anchors/tailscale")
-        ;;
-      *)
-        return 1
-        ;;
-    esac
-  done < <("$FIND_BIN" "$PF_WATCHER_INSTALL_DIR" -mindepth 1 -maxdepth 4 -print 2>/dev/null)
-}
-
-launchd_service_target() {
-  echo "system/$1"
+  has_exact_line "$PF_WATCHER_MARKER_FILE" "$PF_WATCHER_MARKER_CONTENT"
 }
 
 launchd_loaded() {
-  "$LAUNCHCTL_BIN" print "system/$1" >/dev/null 2>&1
+  launchctl print "system/$1" >/dev/null 2>&1
 }
 
 bootout_launchd() {
   local label="$1"
 
   if launchd_loaded "$label"; then
-    "$LAUNCHCTL_BIN" bootout "system/$label" >/dev/null 2>&1
+    launchctl bootout "system/$label" >/dev/null 2>&1
   fi
 }
 
@@ -945,25 +831,9 @@ bootstrap_launchd() {
 
   # Keep launchctl's stderr visible during an interactive install. Suppressing
   # it previously reduced a failed bootstrap to an unactionable generic error.
-  "$LAUNCHCTL_BIN" bootstrap system "$plist" >/dev/null || return 1
-  "$LAUNCHCTL_BIN" kickstart -k "system/$label" >/dev/null || return 1
+  launchctl bootstrap system "$plist" >/dev/null || return 1
+  launchctl kickstart -k "system/$label" >/dev/null || return 1
   launchd_loaded "$label"
-}
-
-launchdaemon_service_target() {
-  launchd_service_target "$TAILSCALED_DAEMON_LABEL"
-}
-
-launchdaemon_loaded() {
-  launchd_loaded "$TAILSCALED_DAEMON_LABEL"
-}
-
-bootout_launchdaemon() {
-  bootout_launchd "$TAILSCALED_DAEMON_LABEL"
-}
-
-bootstrap_launchdaemon() {
-  bootstrap_launchd "$TAILSCALED_DAEMON_PLIST" "$TAILSCALED_DAEMON_LABEL"
 }
 
 resolver_file_for_domain() {
@@ -999,8 +869,8 @@ resolver_file_managed_by_repo() {
 flush_dns_caches() {
   local rc=0
 
-  "$DSCACHEUTIL_BIN" -flushcache >/dev/null 2>&1 || rc=1
-  "$KILLALL_BIN" -HUP mDNSResponder >/dev/null 2>&1 || rc=1
+  dscacheutil -flushcache >/dev/null 2>&1 || rc=1
+  killall -HUP mDNSResponder >/dev/null 2>&1 || rc=1
 
   return "$rc"
 }

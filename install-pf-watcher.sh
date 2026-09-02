@@ -41,24 +41,18 @@ while [[ $# -gt 0 ]]; do
 done
 
 require_root
-MIGRATING_LEGACY_WATCHER=0
 
 for required in refresh-anchor.sh lib/common.sh etc/pf.anchors/tailscale; do
   [[ -f "$SCRIPT_DIR/$required" ]] || die "Missing required file: $SCRIPT_DIR/$required"
 done
 
-if [[ -f "$PF_WATCHER_PLIST" ]] && ! plist_managed_by_repo "$PF_WATCHER_PLIST" && \
-  ! legacy_pf_watcher_plist_managed_by_repo "$PF_WATCHER_PLIST" && [[ "$REPLACE_EXISTING" -ne 1 ]]; then
-  die "$PF_WATCHER_PLIST exists but is not recognized as repo-managed. Refusing to overwrite it."
-fi
-if [[ -f "$PF_WATCHER_PLIST" ]] && ! plist_managed_by_repo "$PF_WATCHER_PLIST" && \
-  legacy_pf_watcher_plist_managed_by_repo "$PF_WATCHER_PLIST"; then
-  MIGRATING_LEGACY_WATCHER=1
-fi
-
-if [[ -d "$PF_WATCHER_INSTALL_DIR" ]] && ! pf_watcher_payload_managed_by_repo && \
-  ! legacy_pf_watcher_payload_managed_by_repo && [[ "$REPLACE_EXISTING" -ne 1 ]]; then
-  die "$PF_WATCHER_INSTALL_DIR exists but is not recognized as a repo-managed payload. Refusing to overwrite it."
+if [[ "$REPLACE_EXISTING" -ne 1 ]]; then
+  if [[ -f "$PF_WATCHER_PLIST" ]] && ! plist_managed_by_repo "$PF_WATCHER_PLIST"; then
+    die "$PF_WATCHER_PLIST exists but is not recognized as repo-managed. Refusing to overwrite it; inspect it and rerun with --replace-existing to adopt it."
+  fi
+  if [[ -d "$PF_WATCHER_INSTALL_DIR" ]] && ! pf_watcher_payload_managed_by_repo; then
+    die "$PF_WATCHER_INSTALL_DIR exists but is not recognized as a repo-managed payload. Refusing to overwrite it; inspect it and rerun with --replace-existing to adopt it."
+  fi
 fi
 
 echo "Installing watcher payload to $PF_WATCHER_INSTALL_DIR ..."
@@ -89,13 +83,8 @@ echo "Bootstrapping $PF_WATCHER_LABEL ..."
 bootout_launchd "$PF_WATCHER_LABEL" || true
 bootstrap_launchd "$PF_WATCHER_PLIST" "$PF_WATCHER_LABEL" || die "Failed to bootstrap $PF_WATCHER_LABEL."
 
-if [[ "$MIGRATING_LEGACY_WATCHER" -eq 1 && -f "$LEGACY_PF_WATCHER_LOG" ]]; then
-  "$CHOWN_BIN" root:wheel "$LEGACY_PF_WATCHER_LOG"
-  "$CHMOD_BIN" 600 "$LEGACY_PF_WATCHER_LOG"
-fi
-
 echo ""
 echo "Done. The pf-watcher will reattach the anchor to Tailscale's current interface"
 echo "(it re-checks about every two minutes and on DNS resolver changes)."
-echo "Verified loaded service: $(launchd_service_target "$PF_WATCHER_LABEL")"
-echo "Routine output is discarded by default to avoid persistent tailnet metadata logs."
+echo "Verified loaded service: system/$PF_WATCHER_LABEL"
+echo "Routine output is discarded to avoid persistent tailnet metadata logs."

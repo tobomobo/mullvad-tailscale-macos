@@ -212,12 +212,13 @@ copy root-owned and non-writable by group/other users, and points the marked
 plist at the copy. Existing unmarked plists require an explicit
 `--replace-existing` adoption step.
 
-Repo-managed anchors, plists, resolver files, and watcher payloads carry markers,
-or must match the exact narrow legacy anchor policy. Installers and uninstallers
-refuse unrecognized collisions. LaunchDaemon stdout and stderr go to `/dev/null`
-by default so tailnet addresses and topology do not accumulate in persistent
-world-readable files; interactive script execution remains available for
-diagnostics. Installers also require `launchctl print` to confirm that a newly
+Repo-managed plists, resolver files, and watcher payloads carry markers; the PF
+anchor file is instead recognized by containing exactly the four expected rules
+and nothing else, ignoring comments and blank lines. Its marker comment is
+advisory. Installers and uninstallers refuse unrecognized collisions. LaunchDaemon
+stdout and stderr go to `/dev/null` so tailnet addresses and topology do not
+accumulate in persistent world-readable files; interactive script execution
+remains available for diagnostics. Installers also require `launchctl print` to confirm that a newly
 bootstrapped job is loaded, and the verifier reports job loading separately from
 plist presence and process presence.
 

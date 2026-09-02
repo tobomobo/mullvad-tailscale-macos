@@ -305,21 +305,14 @@ run_install_env() {
   shift
 
   local bin_dir="$workspace/bin"
+  PATH="$bin_dir:$PATH" \
   TEST_LOG_DIR="$workspace/logs" \
   IFCONFIG_FIXTURES_DIR="$workspace/ifconfig" \
   SKIP_ROOT_CHECK=1 \
   PF_CONF="$workspace/pf.conf" \
   ANCHOR_FILE="$workspace/pf.anchors/tailscale" \
-  PFCTL_BIN="$bin_dir/pfctl" \
-  IFCONFIG_BIN="$bin_dir/ifconfig" \
-  TAILSCALE_BIN="$bin_dir/tailscale" \
-  MULLVAD_BIN="$bin_dir/mullvad" \
   PF_WATCHER_INSTALL_DIR="$workspace/watcher" \
   PF_WATCHER_PLIST="$workspace/com.mullvad-tailscale-macos.pf-watcher.plist" \
-  PF_WATCHER_LOG="/dev/null" \
-  PLUTIL_BIN="$bin_dir/plutil" \
-  LAUNCHCTL_BIN="$bin_dir/launchctl" \
-  CHOWN_BIN="$bin_dir/chown" \
   CHMOD_BIN="$bin_dir/chmod" \
   bash "$ROOT_DIR/install.sh" "$@"
 }
@@ -329,15 +322,13 @@ run_uninstall_env() {
   shift
 
   local bin_dir="$workspace/bin"
+  PATH="$bin_dir:$PATH" \
   TEST_LOG_DIR="$workspace/logs" \
   SKIP_ROOT_CHECK=1 \
   PF_CONF="$workspace/pf.conf" \
   ANCHOR_FILE="$workspace/pf.anchors/tailscale" \
-  PFCTL_BIN="$bin_dir/pfctl" \
-  MULLVAD_BIN="$bin_dir/mullvad" \
   PF_WATCHER_INSTALL_DIR="$workspace/watcher" \
   PF_WATCHER_PLIST="$workspace/com.mullvad-tailscale-macos.pf-watcher.plist" \
-  LAUNCHCTL_BIN="$bin_dir/launchctl" \
   bash "$ROOT_DIR/uninstall.sh" "$@"
 }
 
@@ -346,24 +337,14 @@ run_verify_env() {
   shift
 
   local bin_dir="$workspace/bin"
+  PATH="$bin_dir:$PATH" \
   TEST_LOG_DIR="$workspace/logs" \
   IFCONFIG_FIXTURES_DIR="$workspace/ifconfig" \
   SKIP_ROOT_CHECK=1 \
   PF_CONF="$workspace/pf.conf" \
   ANCHOR_FILE="$workspace/pf.anchors/tailscale" \
   RESOLVER_DIR="$workspace/resolver" \
-  PFCTL_BIN="$bin_dir/pfctl" \
-  IFCONFIG_BIN="$bin_dir/ifconfig" \
-  MULLVAD_BIN="$bin_dir/mullvad" \
-  PGREP_BIN="$bin_dir/pgrep" \
-  CURL_BIN="$bin_dir/curl" \
-  DIG_BIN="$bin_dir/dig" \
-  DSCACHEUTIL_BIN="$bin_dir/dscacheutil" \
-  SCUTIL_BIN="$bin_dir/scutil" \
-  KILLALL_BIN="$bin_dir/killall" \
   HOSTS_FILE="$workspace/hosts" \
-  TAILSCALE_BIN="$bin_dir/tailscale" \
-  LAUNCHCTL_BIN="$bin_dir/launchctl" \
   STAT_BIN="$bin_dir/stat" \
   TAILSCALED_DAEMON_PLIST="$workspace/com.tailscale.tailscaled.plist" \
   TAILSCALED_MANAGED_BIN="$workspace/managed-tailscaled" \
@@ -377,14 +358,12 @@ run_daemon_install_env() {
   shift
 
   local bin_dir="$workspace/bin"
+  PATH="$bin_dir:$PATH" \
   TEST_LOG_DIR="$workspace/logs" \
   SKIP_ROOT_CHECK=1 \
   TAILSCALED_BIN="$workspace/source-tailscaled" \
   TAILSCALED_MANAGED_BIN="$workspace/managed-tailscaled" \
   TAILSCALED_DAEMON_PLIST="$workspace/com.tailscale.tailscaled.plist" \
-  PLUTIL_BIN="$bin_dir/plutil" \
-  LAUNCHCTL_BIN="$bin_dir/launchctl" \
-  CHOWN_BIN="$bin_dir/chown" \
   CHMOD_BIN="$bin_dir/chmod" \
   bash "$ROOT_DIR/install-tailscaled-daemon.sh" "$@"
 }
@@ -394,11 +373,11 @@ run_daemon_uninstall_env() {
   shift
 
   local bin_dir="$workspace/bin"
+  PATH="$bin_dir:$PATH" \
   TEST_LOG_DIR="$workspace/logs" \
   SKIP_ROOT_CHECK=1 \
   TAILSCALED_DAEMON_PLIST="$workspace/com.tailscale.tailscaled.plist" \
   TAILSCALED_MANAGED_BIN="$workspace/managed-tailscaled" \
-  LAUNCHCTL_BIN="$bin_dir/launchctl" \
   bash "$ROOT_DIR/uninstall-tailscaled-daemon.sh" "$@"
 }
 
@@ -407,14 +386,11 @@ run_resolver_install_env() {
   shift
 
   local bin_dir="$workspace/bin"
+  PATH="$bin_dir:$PATH" \
   TEST_LOG_DIR="$workspace/logs" \
   SKIP_ROOT_CHECK=1 \
   RESOLVER_DIR="$workspace/resolver" \
-  DSCACHEUTIL_BIN="$bin_dir/dscacheutil" \
-  KILLALL_BIN="$bin_dir/killall" \
-  CHOWN_BIN="$bin_dir/chown" \
   CHMOD_BIN="$bin_dir/chmod" \
-  CP_BIN="cp" \
   bash "$ROOT_DIR/install-tailnet-resolver.sh" "$@"
 }
 
@@ -423,12 +399,10 @@ run_resolver_uninstall_env() {
   shift
 
   local bin_dir="$workspace/bin"
+  PATH="$bin_dir:$PATH" \
   TEST_LOG_DIR="$workspace/logs" \
   SKIP_ROOT_CHECK=1 \
   RESOLVER_DIR="$workspace/resolver" \
-  DSCACHEUTIL_BIN="$bin_dir/dscacheutil" \
-  KILLALL_BIN="$bin_dir/killall" \
-  CP_BIN="cp" \
   bash "$ROOT_DIR/uninstall-tailnet-resolver.sh" "$@"
 }
 
@@ -437,16 +411,12 @@ run_pf_watcher_install_env() {
   shift
 
   local bin_dir="$workspace/bin"
+  PATH="$bin_dir:$PATH" \
   TEST_LOG_DIR="$workspace/logs" \
   SKIP_ROOT_CHECK=1 \
   PF_WATCHER_INSTALL_DIR="$workspace/watcher" \
   PF_WATCHER_PLIST="$workspace/com.mullvad-tailscale-macos.pf-watcher.plist" \
-  PF_WATCHER_LOG="/dev/null" \
-  PLUTIL_BIN="$bin_dir/plutil" \
-  LAUNCHCTL_BIN="$bin_dir/launchctl" \
-  CHOWN_BIN="$bin_dir/chown" \
   CHMOD_BIN="$bin_dir/chmod" \
-  CP_BIN="cp" \
   bash "$ROOT_DIR/install-pf-watcher.sh" "$@"
 }
 
@@ -455,12 +425,11 @@ run_pf_watcher_uninstall_env() {
   shift
 
   local bin_dir="$workspace/bin"
+  PATH="$bin_dir:$PATH" \
   TEST_LOG_DIR="$workspace/logs" \
   SKIP_ROOT_CHECK=1 \
   PF_WATCHER_INSTALL_DIR="$workspace/watcher" \
   PF_WATCHER_PLIST="$workspace/com.mullvad-tailscale-macos.pf-watcher.plist" \
-  LAUNCHCTL_BIN="$bin_dir/launchctl" \
-  RM_BIN="rm" \
   bash "$ROOT_DIR/uninstall-pf-watcher.sh" "$@"
 }
 
@@ -469,18 +438,13 @@ run_refresh_env() {
   shift
 
   local bin_dir="$workspace/bin"
+  PATH="$bin_dir:$PATH" \
   TEST_LOG_DIR="$workspace/logs" \
   IFCONFIG_FIXTURES_DIR="$workspace/ifconfig" \
   SKIP_ROOT_CHECK=1 \
   PF_CONF="$workspace/pf.conf" \
   ANCHOR_FILE="$workspace/pf.anchors/tailscale" \
-  PFCTL_BIN="$bin_dir/pfctl" \
-  IFCONFIG_BIN="$bin_dir/ifconfig" \
-  TAILSCALE_BIN="$bin_dir/tailscale" \
-  MULLVAD_BIN="$bin_dir/mullvad" \
-  CHOWN_BIN="$bin_dir/chown" \
   CHMOD_BIN="$bin_dir/chmod" \
-  CP_BIN="cp" \
   bash "$ROOT_DIR/refresh-anchor.sh" "$@"
 }
 
@@ -1054,10 +1018,8 @@ EOF
   /bin/chmod +a "everyone allow write" "$workspace/destination"
 
   if ! output="$(
-    PATH="$shadow_dir:$PATH" \
+    PATH="$shadow_dir:$workspace/bin:$PATH" \
     SCRIPT_DIR="$ROOT_DIR" \
-    CHOWN_BIN="$workspace/bin/chown" \
-    CP_BIN=/bin/cp \
     bash -c 'set -euo pipefail; unset CHMOD_BIN; source "$SCRIPT_DIR/lib/common.sh"; install_root_owned_file "$1" "$2"' \
       _ "$workspace/source" "$workspace/destination" 2>&1
   )"; then
@@ -1229,22 +1191,33 @@ EOF
 }
 
 test_blocker_dns_classifier_boundaries() {
+  local workspace
   local out
-  if ! out="$(
-    ROOT_DIR="$ROOT_DIR" bash -c '
-      source "$ROOT_DIR/lib/common.sh"
-      rc=0
-      for ip in 100.64.0.1 100.64.0.3 100.64.0.7 100.64.0.10 100.64.0.63; do
-        dns_server_is_mullvad_blocker "$ip" || { echo "should-accept $ip"; rc=1; }
-      done
-      for ip in 100.64.0.0 100.64.0.64 100.64.0.255 10.64.0.1 100.100.100.100 192.168.0.1; do
-        dns_server_is_mullvad_blocker "$ip" && { echo "should-reject $ip"; rc=1; }
-      done
-      exit $rc
-    ' 2>&1
-  )"; then
-    fail "Blocker DNS classifier misclassified: $out"
-  fi
+  local scutil_output=""
+  local ip
+  local accept=(100.64.0.1 100.64.0.3 100.64.0.7 100.64.0.10 100.64.0.63)
+  local reject=(100.64.0.0 100.64.0.64 100.64.0.255 10.64.0.1 100.100.100.100 192.168.0.1)
+  workspace="$(new_workspace blocker-dns-boundaries)"
+
+  for ip in "${accept[@]}" "${reject[@]}"; do
+    scutil_output+="  nameserver[0] : $ip"$'\n'
+  done
+
+  out="$(
+    PATH="$workspace/bin:$PATH" \
+    ROOT_DIR="$ROOT_DIR" \
+    SCUTIL_OUTPUT="$scutil_output" \
+    bash -c 'source "$ROOT_DIR/lib/common.sh"; mullvad_blocker_dns_in_use'
+  )"
+
+  for ip in "${accept[@]}"; do
+    grep -Fqx -- "$ip" <<<"$out" || fail "Blocker DNS classifier should have flagged $ip"
+  done
+  for ip in "${reject[@]}"; do
+    if grep -Fqx -- "$ip" <<<"$out"; then
+      fail "Blocker DNS classifier should not have flagged $ip"
+    fi
+  done
   pass "Mullvad content-blocker DNS classifier accepts 100.64.0.1-63 and rejects everything else"
 }
 
@@ -1297,7 +1270,10 @@ EOF
   [[ ! -f "$workspace/resolver/bear-skate.ts.net" ]] || fail "Expected resolver override to be removed"
   assert_file_contains "$workspace/logs/dscacheutil.calls" "-flushcache"
   assert_file_contains "$workspace/logs/killall.calls" "-HUP mDNSResponder"
-  pass "resolver uninstaller removes the override and flushes DNS"
+  # Backups must stay timestamped, or repeated runs overwrite each other.
+  compgen -G "$workspace/resolver/bear-skate.ts.net.bak.[0-9]*" >/dev/null || \
+    fail "Expected a timestamped backup of the removed resolver override"
+  pass "resolver uninstaller removes the override, keeps a timestamped backup, and flushes DNS"
 }
 
 test_resolver_uninstaller_refuses_unmanaged_existing_file() {
@@ -1390,6 +1366,128 @@ test_pf_watcher_uninstaller_boots_out_and_removes() {
   [[ ! -f "$workspace/com.mullvad-tailscale-macos.pf-watcher.plist" ]] || fail "Expected the pf-watcher plist to be removed"
   [[ ! -d "$workspace/watcher" ]] || fail "Expected the watcher payload directory to be removed"
   pass "pf-watcher uninstaller unloads, removes the plist, and removes the payload"
+}
+
+test_interface_detection_without_tailscale_cli() {
+  local workspace
+  local interface
+  workspace="$(new_workspace interface-without-cli)"
+
+  rm "$workspace/bin/tailscale"
+  cat > "$workspace/ifconfig/utun8" <<'EOF'
+utun8: flags=8051<UP,POINTOPOINT,RUNNING,MULTICAST> mtu 1280
+	inet 100.82.1.2 --> 100.82.1.2 netmask 0xffffffff
+	inet6 fd7a:115c:a1e0::5252:102 --> fd7a:115c:a1e0::5252:102 prefixlen 128
+EOF
+
+  interface="$(
+    PATH="$workspace/bin:/usr/bin:/bin" \
+    IFCONFIG_LIST="lo0 utun8" \
+    IFCONFIG_FIXTURES_DIR="$workspace/ifconfig" \
+    ROOT_DIR="$ROOT_DIR" \
+    bash -c 'source "$ROOT_DIR/lib/common.sh"; detect_tailscale_interface'
+  )" || fail "Expected interface detection to work without the Tailscale CLI in PATH"
+
+  [[ "$interface" == "utun8" ]] || fail "Expected utun8 without the Tailscale CLI, got: $interface"
+  cp "$workspace/ifconfig/utun8" "$workspace/ifconfig/utun9"
+  local detect_status=0
+  PATH="$workspace/bin:/usr/bin:/bin" \
+    IFCONFIG_LIST="lo0 utun8 utun9" \
+    IFCONFIG_FIXTURES_DIR="$workspace/ifconfig" \
+    ROOT_DIR="$ROOT_DIR" \
+    bash -c 'source "$ROOT_DIR/lib/common.sh"; detect_tailscale_interface' >/dev/null || detect_status=$?
+  [[ "$detect_status" -eq 2 ]] || fail "Expected fallback detection to exit 2 for multiple matching utuns, got: $detect_status"
+  pass "interface detection survives launchd PATH without the Tailscale CLI"
+}
+
+test_refresh_refuses_ambiguous_utun_fallback() {
+  local workspace
+  local status=0
+  local output
+  workspace="$(new_workspace refresh-ambiguous-utun)"
+
+  rm "$workspace/bin/tailscale"
+  for iface in utun8 utun9; do
+    cat > "$workspace/ifconfig/$iface" <<EOF
+$iface: flags=8051<UP,POINTOPOINT,RUNNING,MULTICAST> mtu 1280
+	inet6 fd7a:115c:a1e0::5252:102 --> fd7a:115c:a1e0::5252:102 prefixlen 128
+EOF
+  done
+
+  output="$(
+    PATH="$workspace/bin:/usr/bin:/bin" \
+    TEST_LOG_DIR="$workspace/logs" \
+    IFCONFIG_LIST="lo0 utun8 utun9" \
+    IFCONFIG_FIXTURES_DIR="$workspace/ifconfig" \
+    SKIP_ROOT_CHECK=1 \
+    PF_CONF="$workspace/pf.conf" \
+    ANCHOR_FILE="$workspace/pf.anchors/tailscale" \
+    CHMOD_BIN="$workspace/bin/chmod" \
+    bash "$ROOT_DIR/refresh-anchor.sh" 2>&1
+  )" || status=$?
+  [[ "$status" -ne 0 ]] || fail "refresh should fail loudly when several utuns carry the Tailscale ULA prefix"
+  [[ "$output" == *"refusing to guess"* ]] || fail "Expected an ambiguity error, got: $output"
+  assert_file_not_contains "$workspace/logs/pfctl.calls" "-a tailscale -f"
+  pass "refresh exits non-zero instead of guessing between ambiguous utuns"
+}
+
+test_refresh_is_noop_without_mullvad_cli_or_mullvad_anchor() {
+  local workspace
+  workspace="$(new_workspace refresh-no-mullvad-evidence)"
+
+  rm "$workspace/bin/mullvad"
+  cat > "$workspace/ifconfig/utun7" <<'EOF'
+utun7: flags=8051<UP,POINTOPOINT,RUNNING,MULTICAST> mtu 1280
+	inet 100.82.1.2 --> 100.82.1.2 netmask 0xffffffff
+EOF
+
+  PATH="$workspace/bin:/usr/bin:/bin" \
+    TEST_LOG_DIR="$workspace/logs" \
+    IFCONFIG_LIST="lo0 utun7" \
+    IFCONFIG_FIXTURES_DIR="$workspace/ifconfig" \
+    SKIP_ROOT_CHECK=1 \
+    PF_CONF="$workspace/pf.conf" \
+    ANCHOR_FILE="$workspace/pf.anchors/tailscale" \
+    CHMOD_BIN="$workspace/bin/chmod" \
+    PFCTL_MAIN_RULES='anchor "tailscale" all' \
+    bash "$ROOT_DIR/refresh-anchor.sh" >/dev/null 2>&1 || \
+    fail "refresh should exit 0 when the Mullvad CLI is unavailable and PF carries no Mullvad anchor"
+  assert_file_not_contains "$workspace/logs/pfctl.calls" "-a tailscale -f"
+  if grep -Eq '^-f ' "$workspace/logs/pfctl.calls"; then
+    fail "Did not expect a full PF reload without Mullvad evidence"
+  fi
+  pass "refresh is a quiet no-op without Mullvad CLI or Mullvad PF evidence"
+}
+
+test_missing_mullvad_cli_requires_active_pf_protection() {
+  local workspace
+  workspace="$(new_workspace mullvad-without-cli)"
+  rm "$workspace/bin/mullvad"
+
+  if PATH="$workspace/bin:/usr/bin:/bin" \
+    TEST_LOG_DIR="$workspace/logs" \
+    PFCTL_MAIN_RULES='anchor "tailscale" all' \
+    ROOT_DIR="$ROOT_DIR" \
+    bash -c 'source "$ROOT_DIR/lib/common.sh"; mullvad_pf_protection_is_consistent'; then
+    fail "Expected missing Mullvad CLI and anchor to fail closed"
+  fi
+
+  PATH="$workspace/bin:/usr/bin:/bin" \
+    TEST_LOG_DIR="$workspace/logs" \
+    PFCTL_MAIN_RULES='anchor "tailscale" all\nanchor "mullvad" all' \
+    ROOT_DIR="$ROOT_DIR" \
+    bash -c 'source "$ROOT_DIR/lib/common.sh"; mullvad_pf_protection_is_consistent' || \
+    fail "Expected active Mullvad PF protection to replace the unavailable CLI check"
+
+  if PATH="$workspace/bin:/usr/bin:/bin" \
+    TEST_LOG_DIR="$workspace/logs" \
+    PFCTL_MAIN_RULES='anchor "tailscale" all\nanchor "mullvad" all' \
+    PFCTL_MULLVAD_RULES="" \
+    ROOT_DIR="$ROOT_DIR" \
+    bash -c 'source "$ROOT_DIR/lib/common.sh"; mullvad_pf_protection_is_consistent'; then
+    fail "Expected a called but empty Mullvad anchor to fail closed without the CLI"
+  fi
+  pass "missing Mullvad CLI requires active PF protection"
 }
 
 test_refresh_reattaches_anchor_on_interface_change() {
@@ -1747,6 +1845,7 @@ test_daemon_scripts_refuse_unmarked_plist() {
 
 test_watcher_scripts_refuse_unrecognized_artifacts() {
   local workspace
+  local output
   workspace="$(new_workspace watcher-unmarked)"
 
   mkdir -p "$workspace/watcher"
@@ -1754,9 +1853,13 @@ test_watcher_scripts_refuse_unrecognized_artifacts() {
   printf '%s\n' '<plist><dict><string>foreign watcher</string></dict></plist>' > "$workspace/com.mullvad-tailscale-macos.pf-watcher.plist"
 
   run_pf_watcher_install_env "$workspace" >/dev/null 2>&1 && fail "watcher installer should refuse unrecognized artifacts"
-  run_pf_watcher_uninstall_env "$workspace" >/dev/null 2>&1 && fail "watcher uninstaller should refuse unrecognized artifacts"
+  output="$(run_pf_watcher_uninstall_env "$workspace" 2>&1)" && fail "watcher uninstaller should refuse unrecognized artifacts"
   assert_file_contains "$workspace/watcher/foreign" "foreign payload"
-  pass "watcher scripts refuse to overwrite or delete unrecognized artifacts"
+  # The removal path has no adoption flag, so the refusal must name the manual
+  # steps or an install from an earlier revision cannot be uninstalled at all.
+  grep -Fq "launchctl bootout system/com.mullvad-tailscale-macos.pf-watcher" <<<"$output" || \
+    fail "Expected the refusal to name the manual removal steps: $output"
+  pass "watcher scripts refuse to overwrite or delete unrecognized artifacts and explain manual removal"
 }
 
 test_refresh_refuses_when_mullvad_protection_is_missing() {
@@ -1821,6 +1924,10 @@ test_daemon_uninstaller_boots_out_and_removes_plist
 test_daemon_scripts_refuse_unmarked_plist
 test_pf_watcher_installer_installs_payload_and_bootstraps
 test_pf_watcher_uninstaller_boots_out_and_removes
+test_interface_detection_without_tailscale_cli
+test_refresh_refuses_ambiguous_utun_fallback
+test_refresh_is_noop_without_mullvad_cli_or_mullvad_anchor
+test_missing_mullvad_cli_requires_active_pf_protection
 test_watcher_scripts_refuse_unrecognized_artifacts
 test_refresh_reattaches_anchor_on_interface_change
 test_refresh_noop_when_interface_unchanged

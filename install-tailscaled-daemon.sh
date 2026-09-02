@@ -35,13 +35,8 @@ done
 
 require_root
 
-ADOPTING_UNMARKED=0
-
 if [[ -f "$TAILSCALED_DAEMON_PLIST" ]] && ! plist_managed_by_repo "$TAILSCALED_DAEMON_PLIST" && [[ "$REPLACE_EXISTING" -ne 1 ]]; then
   die "$TAILSCALED_DAEMON_PLIST exists but is not marked as managed by this repo. Refusing to overwrite it; inspect it and rerun with --replace-existing to adopt it."
-fi
-if [[ -f "$TAILSCALED_DAEMON_PLIST" ]] && ! plist_managed_by_repo "$TAILSCALED_DAEMON_PLIST"; then
-  ADOPTING_UNMARKED=1
 fi
 
 if [[ -e "$TAILSCALED_MANAGED_BIN" && ! -f "$TAILSCALED_DAEMON_PLIST" && "$REPLACE_EXISTING" -ne 1 ]]; then
@@ -61,7 +56,7 @@ if [[ "$tailscaled_bin" != "$TAILSCALED_MANAGED_BIN" ]] || file_differs "$tailsc
   echo "Installing root-owned tailscaled binary to $TAILSCALED_MANAGED_BIN ..."
   install_root_owned_file "$tailscaled_bin" "$TAILSCALED_MANAGED_BIN" 755
 fi
-"$CHOWN_BIN" root:wheel "$TAILSCALED_MANAGED_BIN"
+chown root:wheel "$TAILSCALED_MANAGED_BIN"
 "$CHMOD_BIN" 755 "$TAILSCALED_MANAGED_BIN"
 
 write_launchdaemon_plist "$tmp_plist" "$TAILSCALED_MANAGED_BIN"
@@ -71,20 +66,12 @@ echo "Installing LaunchDaemon to $TAILSCALED_DAEMON_PLIST ..."
 install_root_owned_file "$tmp_plist" "$TAILSCALED_DAEMON_PLIST"
 
 echo "Bootstrapping $TAILSCALED_DAEMON_LABEL ..."
-bootout_launchdaemon || true
-bootstrap_launchdaemon || die "Failed to bootstrap $TAILSCALED_DAEMON_LABEL."
-
-if [[ "$ADOPTING_UNMARKED" -eq 1 ]]; then
-  for legacy_log in "$LEGACY_TAILSCALED_STDOUT_PATH" "$LEGACY_TAILSCALED_STDERR_PATH"; do
-    if [[ -f "$legacy_log" ]]; then
-      "$CHOWN_BIN" root:wheel "$legacy_log"
-      "$CHMOD_BIN" 600 "$legacy_log"
-    fi
-  done
-fi
+bootout_launchd "$TAILSCALED_DAEMON_LABEL" || true
+bootstrap_launchd "$TAILSCALED_DAEMON_PLIST" "$TAILSCALED_DAEMON_LABEL" || \
+  die "Failed to bootstrap $TAILSCALED_DAEMON_LABEL."
 
 echo ""
 echo "Done. tailscaled will now start at boot via launchd."
-echo "Verified loaded service: $(launchdaemon_service_target)"
-echo "Standard output and error are discarded by default to avoid persistent tailnet metadata logs."
+echo "Verified loaded service: system/$TAILSCALED_DAEMON_LABEL"
+echo "Standard output and error are discarded to avoid persistent tailnet metadata logs."
 echo "Authenticate with: tailscale up"
