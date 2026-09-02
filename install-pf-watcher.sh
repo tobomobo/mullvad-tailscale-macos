@@ -48,10 +48,10 @@ done
 
 if [[ "$REPLACE_EXISTING" -ne 1 ]]; then
   if [[ -f "$PF_WATCHER_PLIST" ]] && ! plist_managed_by_repo "$PF_WATCHER_PLIST"; then
-    die "$PF_WATCHER_PLIST exists but is not recognized as repo-managed. Refusing to overwrite it."
+    die "$PF_WATCHER_PLIST exists but is not recognized as repo-managed. Refusing to overwrite it; inspect it and rerun with --replace-existing to adopt it."
   fi
   if [[ -d "$PF_WATCHER_INSTALL_DIR" ]] && ! pf_watcher_payload_managed_by_repo; then
-    die "$PF_WATCHER_INSTALL_DIR exists but is not recognized as a repo-managed payload. Refusing to overwrite it."
+    die "$PF_WATCHER_INSTALL_DIR exists but is not recognized as a repo-managed payload. Refusing to overwrite it; inspect it and rerun with --replace-existing to adopt it."
   fi
 fi
 

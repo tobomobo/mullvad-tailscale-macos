@@ -1390,14 +1390,73 @@ EOF
 
   [[ "$interface" == "utun8" ]] || fail "Expected utun8 without the Tailscale CLI, got: $interface"
   cp "$workspace/ifconfig/utun8" "$workspace/ifconfig/utun9"
-  if PATH="$workspace/bin:/usr/bin:/bin" \
+  local detect_status=0
+  PATH="$workspace/bin:/usr/bin:/bin" \
     IFCONFIG_LIST="lo0 utun8 utun9" \
     IFCONFIG_FIXTURES_DIR="$workspace/ifconfig" \
     ROOT_DIR="$ROOT_DIR" \
-    bash -c 'source "$ROOT_DIR/lib/common.sh"; detect_tailscale_interface' >/dev/null; then
-    fail "Expected fallback interface detection to reject multiple matching utuns"
-  fi
+    bash -c 'source "$ROOT_DIR/lib/common.sh"; detect_tailscale_interface' >/dev/null || detect_status=$?
+  [[ "$detect_status" -eq 2 ]] || fail "Expected fallback detection to exit 2 for multiple matching utuns, got: $detect_status"
   pass "interface detection survives launchd PATH without the Tailscale CLI"
+}
+
+test_refresh_refuses_ambiguous_utun_fallback() {
+  local workspace
+  local status=0
+  local output
+  workspace="$(new_workspace refresh-ambiguous-utun)"
+
+  rm "$workspace/bin/tailscale"
+  for iface in utun8 utun9; do
+    cat > "$workspace/ifconfig/$iface" <<EOF
+$iface: flags=8051<UP,POINTOPOINT,RUNNING,MULTICAST> mtu 1280
+	inet6 fd7a:115c:a1e0::5252:102 --> fd7a:115c:a1e0::5252:102 prefixlen 128
+EOF
+  done
+
+  output="$(
+    PATH="$workspace/bin:/usr/bin:/bin" \
+    TEST_LOG_DIR="$workspace/logs" \
+    IFCONFIG_LIST="lo0 utun8 utun9" \
+    IFCONFIG_FIXTURES_DIR="$workspace/ifconfig" \
+    SKIP_ROOT_CHECK=1 \
+    PF_CONF="$workspace/pf.conf" \
+    ANCHOR_FILE="$workspace/pf.anchors/tailscale" \
+    CHMOD_BIN="$workspace/bin/chmod" \
+    bash "$ROOT_DIR/refresh-anchor.sh" 2>&1
+  )" || status=$?
+  [[ "$status" -ne 0 ]] || fail "refresh should fail loudly when several utuns carry the Tailscale ULA prefix"
+  [[ "$output" == *"refusing to guess"* ]] || fail "Expected an ambiguity error, got: $output"
+  assert_file_not_contains "$workspace/logs/pfctl.calls" "-a tailscale -f"
+  pass "refresh exits non-zero instead of guessing between ambiguous utuns"
+}
+
+test_refresh_is_noop_without_mullvad_cli_or_mullvad_anchor() {
+  local workspace
+  workspace="$(new_workspace refresh-no-mullvad-evidence)"
+
+  rm "$workspace/bin/mullvad"
+  cat > "$workspace/ifconfig/utun7" <<'EOF'
+utun7: flags=8051<UP,POINTOPOINT,RUNNING,MULTICAST> mtu 1280
+	inet 100.82.1.2 --> 100.82.1.2 netmask 0xffffffff
+EOF
+
+  PATH="$workspace/bin:/usr/bin:/bin" \
+    TEST_LOG_DIR="$workspace/logs" \
+    IFCONFIG_LIST="lo0 utun7" \
+    IFCONFIG_FIXTURES_DIR="$workspace/ifconfig" \
+    SKIP_ROOT_CHECK=1 \
+    PF_CONF="$workspace/pf.conf" \
+    ANCHOR_FILE="$workspace/pf.anchors/tailscale" \
+    CHMOD_BIN="$workspace/bin/chmod" \
+    PFCTL_MAIN_RULES='anchor "tailscale" all' \
+    bash "$ROOT_DIR/refresh-anchor.sh" >/dev/null 2>&1 || \
+    fail "refresh should exit 0 when the Mullvad CLI is unavailable and PF carries no Mullvad anchor"
+  assert_file_not_contains "$workspace/logs/pfctl.calls" "-a tailscale -f"
+  if grep -Eq '^-f ' "$workspace/logs/pfctl.calls"; then
+    fail "Did not expect a full PF reload without Mullvad evidence"
+  fi
+  pass "refresh is a quiet no-op without Mullvad CLI or Mullvad PF evidence"
 }
 
 test_missing_mullvad_cli_requires_active_pf_protection() {
@@ -1419,6 +1478,15 @@ test_missing_mullvad_cli_requires_active_pf_protection() {
     ROOT_DIR="$ROOT_DIR" \
     bash -c 'source "$ROOT_DIR/lib/common.sh"; mullvad_pf_protection_is_consistent' || \
     fail "Expected active Mullvad PF protection to replace the unavailable CLI check"
+
+  if PATH="$workspace/bin:/usr/bin:/bin" \
+    TEST_LOG_DIR="$workspace/logs" \
+    PFCTL_MAIN_RULES='anchor "tailscale" all\nanchor "mullvad" all' \
+    PFCTL_MULLVAD_RULES="" \
+    ROOT_DIR="$ROOT_DIR" \
+    bash -c 'source "$ROOT_DIR/lib/common.sh"; mullvad_pf_protection_is_consistent'; then
+    fail "Expected a called but empty Mullvad anchor to fail closed without the CLI"
+  fi
   pass "missing Mullvad CLI requires active PF protection"
 }
 
@@ -1857,6 +1925,8 @@ test_daemon_scripts_refuse_unmarked_plist
 test_pf_watcher_installer_installs_payload_and_bootstraps
 test_pf_watcher_uninstaller_boots_out_and_removes
 test_interface_detection_without_tailscale_cli
+test_refresh_refuses_ambiguous_utun_fallback
+test_refresh_is_noop_without_mullvad_cli_or_mullvad_anchor
 test_missing_mullvad_cli_requires_active_pf_protection
 test_watcher_scripts_refuse_unrecognized_artifacts
 test_refresh_reattaches_anchor_on_interface_change

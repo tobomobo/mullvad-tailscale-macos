@@ -15,7 +15,11 @@ Fix failures before warnings. Warnings about omitted active targets are expected
 The installer identifies the `utun` that carries the address returned by
 `tailscale ip`. The watcher can also identify a sole `utun` carrying
 Tailscale's IPv6 ULA prefix when launchd cannot find the CLI; it still requires
-active Mullvad PF protection before changing PF. Confirm Tailscale is connected:
+active Mullvad PF protection before changing PF. If more than one `utun`
+carries that prefix, the scripts exit with an error instead of guessing; check
+for a second Tailscale backend or pass `--interface`. When the CLI is
+unavailable and PF carries no Mullvad anchor, the watcher exits `0` and leaves
+the anchor unchanged. Confirm Tailscale is connected:
 
 ```bash
 tailscale status

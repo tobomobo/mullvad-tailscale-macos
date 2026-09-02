@@ -211,7 +211,9 @@ detect_tailscale_interface() {
     fi
     if [[ -z "$tailscale_ipv4" && -z "$tailscale_ipv6" ]] && \
       awk '$1 == "inet6" { sub(/%.*/, "", $2); if ($2 ~ /^fd7a:115c:a1e0:/) found=1 } END { exit !found }' <<<"$config"; then
-      [[ -z "$detected_interface" ]] || return 1
+      # Exit 2 marks an ambiguous match so callers can fail loudly instead of
+      # treating it like "Tailscale is not running".
+      [[ -z "$detected_interface" ]] || return 2
       detected_interface="$iface"
     fi
   done

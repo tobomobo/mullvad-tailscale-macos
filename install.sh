@@ -40,7 +40,15 @@ if [[ ! -f "$ANCHOR_TEMPLATE" ]]; then
   die "Cannot find anchor template at $ANCHOR_TEMPLATE"
 fi
 
-interface="$(detect_tailscale_interface)" || die "Unable to detect Tailscale's utun interface. Start Tailscale first or rerun with --interface utunX."
+if interface="$(detect_tailscale_interface)"; then
+  :
+else
+  detect_status=$?
+  if [[ "$detect_status" -eq 2 ]]; then
+    die "Multiple utun interfaces carry Tailscale's IPv6 ULA prefix; refusing to guess. Check for a second Tailscale backend or rerun with --interface utunX."
+  fi
+  die "Unable to detect Tailscale's utun interface. Start Tailscale first or rerun with --interface utunX."
+fi
 tmp_anchor="$(make_temp_file tailscale-anchor)"
 tmp_pf_conf="$(make_temp_file pf-conf)"
 old_anchor="$(make_temp_file old-tailscale-anchor)"
@@ -151,7 +159,7 @@ pfctl -a "$TAILSCALE_ANCHOR_NAME" -sr 2>/dev/null || true
 echo ""
 echo "Installing or updating the automatic PF watcher ..."
 if ! /bin/bash "$SCRIPT_DIR/install-pf-watcher.sh"; then
-  die "The PF exception is active, but the watcher could not be installed. Review the launchctl error and rerun install-pf-watcher.sh."
+  die "The PF exception is active, but the watcher could not be installed. Review the error above and rerun install-pf-watcher.sh; use --replace-existing to adopt an unrecognized earlier watcher install."
 fi
 
 echo ""

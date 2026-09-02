@@ -54,6 +54,14 @@ Repair only this component:
 sudo bash install-pf-watcher.sh
 ```
 
+If an unrecognized watcher plist or payload already exists (for example from a
+checkout that predates the repo's ownership markers), the script refuses to
+replace it. Inspect it, then adopt it explicitly:
+
+```bash
+sudo bash install-pf-watcher.sh --replace-existing
+```
+
 Run it immediately with interactive output:
 
 ```bash

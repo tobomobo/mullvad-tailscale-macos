@@ -55,10 +55,16 @@ if [[ ! -f "$ANCHOR_TEMPLATE" ]]; then
   die "Cannot find anchor template at $ANCHOR_TEMPLATE"
 fi
 
-interface="$(detect_tailscale_interface)" || {
+if interface="$(detect_tailscale_interface)"; then
+  :
+else
+  detect_status=$?
+  if [[ "$detect_status" -eq 2 ]]; then
+    die "Multiple utun interfaces carry Tailscale's IPv6 ULA prefix and the Tailscale CLI is unavailable; refusing to guess. Rerun with --interface utunX or check for a second Tailscale backend."
+  fi
   log_routine "No active Tailscale utun interface detected; leaving the anchor unchanged."
   exit 0
-}
+fi
 
 installed_interface=""
 if [[ -f "$ANCHOR_FILE" ]]; then
@@ -67,7 +73,17 @@ if [[ -f "$ANCHOR_FILE" ]]; then
 fi
 
 runtime_rules="$(pfctl -a "$TAILSCALE_ANCHOR_NAME" -sr 2>/dev/null || true)"
-mullvad_pf_protection_is_consistent || die "Mullvad reports active protection, but its PF anchor is missing or empty. Refusing to attach the Tailscale exception."
+if ! mullvad_pf_protection_is_consistent; then
+  if ! command -v mullvad >/dev/null 2>&1; then
+    # Under launchd the Mullvad CLI is usually not on PATH. Without it, an
+    # active non-empty Mullvad PF anchor is the only evidence that a kill
+    # switch is enforced; when it is absent there is nothing to keep open, so
+    # this is a routine no-op rather than a fault.
+    log_routine "The Mullvad CLI is unavailable and the main PF ruleset carries no active Mullvad anchor; leaving the anchor unchanged."
+    exit 0
+  fi
+  die "Mullvad reports active protection, but its PF anchor is missing or empty. Refusing to attach the Tailscale exception."
+fi
 main_anchor_call_safe=0
 if tailscale_main_anchor_call_is_safe; then
   main_anchor_call_safe=1
