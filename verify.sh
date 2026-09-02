@@ -127,8 +127,14 @@ else
 fi
 
 echo "3. Tailscale interface"
-active_interface="$(detect_tailscale_interface || true)"
-if [[ -n "$active_interface" ]]; then
+active_interface=""
+active_interface_status=0
+active_interface="$(detect_tailscale_interface)" || active_interface_status=$?
+if [[ "$active_interface_status" -eq 2 ]]; then
+  fail "Both CLI tailscaled and a macOS Tailscale app extension are active; competing identities and routes make interface selection ambiguous"
+elif [[ "$active_interface_status" -eq 3 ]]; then
+  fail "Multiple utun interfaces carry Tailscale's IPv6 ULA prefix; interface selection is ambiguous"
+elif [[ -n "$active_interface" ]]; then
   pass "Detected active Tailscale interface: $active_interface"
   if [[ -n "$installed_interface" && "$installed_interface" == "$active_interface" ]]; then
     pass "Installed anchor interface matches the active Tailscale interface"

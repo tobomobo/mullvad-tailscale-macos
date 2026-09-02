@@ -74,7 +74,11 @@ Remove only the watcher:
 sudo bash uninstall-pf-watcher.sh
 ```
 
-The watcher keeps routine output in `/dev/null` to avoid accumulating tailnet metadata in log files.
+The watcher keeps routine output in `/dev/null` to avoid accumulating tailnet metadata in log files. Fatal refusals (an ambiguous interface, a missing Mullvad anchor, a failed reload) are mirrored to the unified log without tailnet addresses:
+
+```bash
+log show --last 1h --predicate 'eventMessage CONTAINS "pf-watcher"'
+```
 
 ## Optional `tailscaled` LaunchDaemon
 

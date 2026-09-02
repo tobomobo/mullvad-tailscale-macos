@@ -73,6 +73,7 @@ Start with `sudo bash verify.sh`, then use the matching guide:
 
 | Symptom | Next step |
 | --- | --- |
+| Installer reports multiple active Tailscale backends | Keep either the CLI daemon or macOS app extension; see [multiple Tailscale backends](docs/troubleshooting.md#multiple-tailscale-backends-are-active) |
 | Tailscale interface cannot be detected | Start Tailscale, then rerun `sudo bash install.sh` |
 | PF anchor is missing, detached, or in the wrong order | Rerun `sudo bash install.sh` |
 | Watcher shows `state = not running` | Check whether it is loaded and last exited with code `0`; it is a periodic job, not a continuously running daemon |
