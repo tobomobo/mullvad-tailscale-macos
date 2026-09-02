@@ -14,6 +14,16 @@ log_routine() {
   fi
 }
 
+# The LaunchDaemon discards stdout and stderr, so a fatal refusal would
+# otherwise leave no trace beyond a non-zero last exit code. Mirror fatal
+# errors to the unified log. Messages name interfaces and anchors, never
+# tailnet addresses.
+die() {
+  logger -t pf-watcher -- "pf-watcher: $*" 2>/dev/null || true
+  echo "Error: $*" >&2
+  exit 1
+}
+
 usage() {
   cat <<EOF
 Usage: sudo bash refresh-anchor.sh [--interface utunX]
