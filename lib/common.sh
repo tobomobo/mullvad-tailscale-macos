@@ -612,6 +612,23 @@ restore_pf_conf_and_runtime() {
   rm -f "$rollback_conf"
 }
 
+# Human-readable hint for a runtime-only main-ruleset anchor call that blocks a
+# full reload. macOS inserts com.apple.internet-sharing for Internet Sharing and
+# for the shared (NAT) networking used by VM and container apps; the anchor
+# exists only while that service runs and is never written to /etc/pf.conf.
+explain_runtime_anchor() {
+  local anchor="$1"
+
+  case "$anchor" in
+    com.apple.internet-sharing*)
+      echo "macOS adds '$anchor' at runtime for Internet Sharing and for the shared networking of VM or container apps such as Parallels Desktop, Docker Desktop, OrbStack, and UTM. Quit those apps (or disable Internet Sharing), confirm the anchor is gone with 'sudo pfctl -sr | grep anchor', then rerun this script. Reopening the apps afterwards is fine. See docs/troubleshooting.md#a-runtime-pf-anchor-blocks-the-reload."
+      ;;
+    *)
+      echo "Another firewall or VPN product attached '$anchor' to the live ruleset without adding it to $PF_CONF. Stop that product, or add its anchor call to $PF_CONF so the staged configuration keeps it, then rerun this script. See docs/troubleshooting.md#a-runtime-pf-anchor-blocks-the-reload."
+      ;;
+  esac
+}
+
 pf_conf_covers_anchor() {
   local file="$1"
   local target="$2"
@@ -656,6 +673,7 @@ apply_pf_conf_update() {
     if [[ "$active_anchor" != "$MULLVAD_ANCHOR_NAME" && "$active_anchor" != "$TAILSCALE_ANCHOR_NAME" ]] && \
       ! pf_conf_covers_anchor "$new_conf" "$active_anchor"; then
       echo "Active main PF anchor call '$active_anchor' is not represented in the staged config; refusing to flush it." >&2
+      explain_runtime_anchor "$active_anchor" >&2
       return 1
     fi
   done <<<"$anchor_calls_before"
