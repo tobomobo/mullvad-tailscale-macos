@@ -262,6 +262,19 @@ printf '%s\n' "$*" >> "$TEST_LOG_DIR/killall.calls"
 exit "${KILLALL_EXIT:-0}"
 EOF
 
+  cat > "$bin_dir/cp" <<'EOF'
+#!/bin/bash
+if [[ -n "${CP_FAIL_GLOB:-}" ]]; then
+  for arg in "$@"; do
+    if [[ "$arg" == $CP_FAIL_GLOB ]]; then
+      echo "cp: stubbed failure writing $arg" >&2
+      exit 1
+    fi
+  done
+fi
+exec /bin/cp "$@"
+EOF
+
   cat > "$bin_dir/logger" <<'EOF'
 #!/bin/bash
 printf '%s\n' "$*" >> "$TEST_LOG_DIR/logger.calls"
@@ -566,6 +579,41 @@ EOF
   assert_count "$workspace/pf.conf" 'set skip on lo0' 1
   assert_file_not_contains "$workspace/pf.conf" 'anchor "tailscale"'
   pass "install restores the original pf.conf when reload fails"
+}
+
+test_install_refuses_when_pf_conf_copies_fail() {
+  local workspace
+  local output
+  workspace="$(new_workspace install-copy-failure)"
+
+  cat > "$workspace/pf.conf" <<'EOF'
+set skip on lo0
+EOF
+
+  # apply_pf_conf_update runs inside command substitution, so set -e cannot
+  # catch a failed copy; the function must check each one before reloading.
+  if output="$(CP_FAIL_GLOB="$workspace/pf.conf.bak.*" run_install_env "$workspace" --interface utun4 2>&1)"; then
+    fail "install should fail when pf.conf cannot be backed up"
+  fi
+  grep -Fq "Unable to back up" <<<"$output" || fail "Expected a backup failure message, got: $output"
+  if grep -Eq '^-f ' "$workspace/logs/pfctl.calls"; then
+    fail "Did not expect a PF reload after a failed backup"
+  fi
+  assert_count "$workspace/pf.conf" 'set skip on lo0' 1
+  assert_file_not_contains "$workspace/pf.conf" 'anchor "tailscale"'
+  [[ ! -f "$workspace/pf.anchors/tailscale" ]] || fail "Expected the staged anchor file to be removed after a failed backup"
+
+  if output="$(CP_FAIL_GLOB="$workspace/pf.conf" run_install_env "$workspace" --interface utun4 2>&1)"; then
+    fail "install should fail when pf.conf cannot be written"
+  fi
+  grep -Fq "PF was not reloaded" <<<"$output" || fail "Expected a pf.conf write failure message, got: $output"
+  if grep -Eq '^-f ' "$workspace/logs/pfctl.calls"; then
+    fail "Did not expect a PF reload after a failed pf.conf write"
+  fi
+  assert_count "$workspace/pf.conf" 'set skip on lo0' 1
+  assert_file_not_contains "$workspace/pf.conf" 'anchor "tailscale"'
+  [[ ! -f "$workspace/pf.anchors/tailscale" ]] || fail "Expected the staged anchor file to be removed after a failed pf.conf write"
+  pass "install refuses to reload PF when backing up or writing pf.conf fails"
 }
 
 test_install_rolls_back_missing_anchor_after_postcheck_failure() {
@@ -2049,6 +2097,7 @@ test_install_detects_interface_and_writes_anchor
 test_install_repairs_partial_anchor_block
 test_install_repairs_missing_anchor_detached_call_and_optimizer_order
 test_install_rolls_back_failed_pf_reload
+test_install_refuses_when_pf_conf_copies_fail
 test_install_rolls_back_missing_anchor_after_postcheck_failure
 test_install_reports_watcher_bootstrap_failure
 test_install_preserves_live_mullvad_anchor_during_reload

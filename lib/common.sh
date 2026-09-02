@@ -386,7 +386,7 @@ backup_file() {
   local file="$1"
   local backup_path="${file}.bak.$(date +%Y%m%d%H%M%S)"
 
-  cp "$file" "$backup_path"
+  cp "$file" "$backup_path" || return 1
   echo "$backup_path"
 }
 
@@ -712,11 +712,30 @@ apply_pf_conf_update() {
       return 1
     }
   else
-    cp "$new_conf" "$runtime_conf"
+    # Callers run this function inside command substitution, where set -e does
+    # not apply, so every copy before the reload is checked explicitly. An
+    # unchecked failure here would hand pfctl an empty runtime file.
+    cp "$new_conf" "$runtime_conf" || {
+      rm -f "$runtime_conf"
+      report_error "Unable to stage the runtime PF config; PF was not reloaded."
+      return 1
+    }
   fi
 
-  backup_path="$(backup_file "$PF_CONF")"
-  cp "$new_conf" "$PF_CONF"
+  backup_path="$(backup_file "$PF_CONF")" || {
+    rm -f "$runtime_conf"
+    report_error "Unable to back up $PF_CONF; PF was not reloaded and the file is unchanged."
+    return 1
+  }
+  if ! cp "$new_conf" "$PF_CONF"; then
+    rm -f "$runtime_conf"
+    if cp "$backup_path" "$PF_CONF"; then
+      report_error "Unable to write $PF_CONF; PF was not reloaded and the previous file was restored from $backup_path."
+    else
+      report_error "CRITICAL: unable to write $PF_CONF and unable to restore it from $backup_path; PF was not reloaded. Restore the file by hand before the next reboot."
+    fi
+    return 1
+  fi
 
   if ! reload_pf_conf "$runtime_conf"; then
     if ! restore_pf_conf_and_runtime "$backup_path" "$anchor_calls_before" "$preserve_mullvad" "$mullvad_rules_before"; then
