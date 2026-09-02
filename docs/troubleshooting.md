@@ -208,7 +208,7 @@ The installer is designed to be rerun and repairs the managed state instead of r
 Active main PF anchor call 'com.apple.internet-sharing' is not represented in the staged config; refusing to flush it.
 ```
 
-macOS attaches `com.apple.internet-sharing` at runtime for Internet Sharing and for apps that use macOS shared (NAT) networking, for example Parallels Desktop, Docker Desktop, OrbStack, or UTM. It lives only in the live ruleset while that service runs; Apple's stock `pf.conf` warns about exactly these dynamic anchors. The refusal happens before anything is written: `pf.conf`, the anchor file, and the watcher stay as they were.
+macOS attaches `com.apple.internet-sharing` at runtime for Internet Sharing and for apps that use macOS shared (NAT) networking, for example Parallels Desktop, Docker Desktop, OrbStack, or UTM. It lives only in the live ruleset while that service runs; Apple's stock `pf.conf` warns about exactly these dynamic anchors. In the original report the anchor disappeared once Parallels Desktop was fully quit. A refusal restores the previous state: `pf.conf`, the anchor file, and the watcher end up as they were.
 
 Check what is attached:
 

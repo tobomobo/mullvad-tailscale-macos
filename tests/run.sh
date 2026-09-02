@@ -1997,6 +1997,30 @@ test_watcher_scripts_refuse_unrecognized_artifacts() {
   # steps or an install from an earlier revision cannot be uninstalled at all.
   grep -Fq "launchctl bootout system/com.mullvad-tailscale-macos.pf-watcher" <<<"$output" || \
     fail "Expected the refusal to name the manual removal steps: $output"
+
+  # uninstall.sh must notice the unrecognized watcher before it touches PF, or
+  # it would remove the exception and leave the foreign watcher loaded.
+  cat > "$workspace/pf.conf" <<EOF
+set skip on lo0
+$ANCHOR_COMMENT
+anchor "tailscale"
+load anchor "tailscale" from "$workspace/pf.anchors/tailscale"
+EOF
+  cat > "$workspace/pf.anchors/tailscale" <<'EOF'
+pass out quick on utun5 inet from any to 100.64.0.0/10 no state
+pass in quick on utun5 inet from 100.64.0.0/10 to any no state
+pass out quick on utun5 inet6 from any to fd7a:115c:a1e0::/48 no state
+pass in quick on utun5 inet6 from fd7a:115c:a1e0::/48 to any no state
+EOF
+  output="$(PF_WATCHER_INSTALL_DIR="$workspace/watcher" \
+    PF_WATCHER_PLIST="$workspace/com.mullvad-tailscale-macos.pf-watcher.plist" \
+    run_uninstall_env "$workspace" 2>&1)" && fail "uninstall should refuse before touching PF when the watcher is unrecognized"
+  grep -Fq "not recognized as repo-managed" <<<"$output" || fail "Expected uninstall to explain the unrecognized watcher: $output"
+  assert_file_contains "$workspace/pf.conf" 'anchor "tailscale"'
+  [[ -f "$workspace/pf.anchors/tailscale" ]] || fail "Expected the anchor file to survive a refused uninstall"
+  if grep -Eq '^-f ' "$workspace/logs/pfctl.calls"; then
+    fail "Did not expect a PF reload when the watcher preflight refuses"
+  fi
   pass "watcher scripts refuse to overwrite or delete unrecognized artifacts and explain manual removal"
 }
 
