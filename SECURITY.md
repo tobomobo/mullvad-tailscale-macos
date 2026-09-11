@@ -47,10 +47,11 @@ attaches its `mullvad` anchor dynamically, so reloading only the persistent
 rules still exist.
 
 For a full reload initiated by this repo, the shared update path snapshots the
-anchor calls in the active main ruleset and Mullvad's rules, refuses unknown
-dynamic calls, adds a runtime-only Mullvad anchor call after the Tailscale
-exception, and verifies that protected calls and Mullvad's rules are unchanged
-afterward. A failed load or post-check uses the same Mullvad-preserving path to
+filter-anchor calls in the active main ruleset and Mullvad's rules, refuses
+unknown dynamic filter-anchor calls (`nat-anchor`, `rdr-anchor`, and
+`scrub-anchor` calls are not inventoried), adds a runtime-only Mullvad anchor
+call after the Tailscale exception, and verifies that protected calls and
+Mullvad's rules are unchanged afterward. A failed load or post-check uses the same Mullvad-preserving path to
 restore and recheck the previous file and runtime ruleset.
 
 A named ruleset can remain populated even when the main PF ruleset no longer

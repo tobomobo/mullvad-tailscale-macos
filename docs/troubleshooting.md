@@ -200,6 +200,26 @@ sudo bash verify.sh \
 
 The installer is designed to be rerun and repairs the managed state instead of requiring a manual reinstall sequence.
 
+## A Runtime PF Anchor Blocks the Reload
+
+`install.sh`, `uninstall.sh`, and the watcher's repair path replace the whole main PF ruleset with `pfctl -f`. Before doing so they refuse if the live ruleset calls an anchor that the staged `pf.conf` does not mention, because the reload would silently drop it:
+
+```
+Active main PF anchor call 'com.apple.internet-sharing' is not represented in the staged config; refusing to flush it.
+```
+
+macOS attaches `com.apple.internet-sharing` at runtime for Internet Sharing and for apps that use macOS shared (NAT) networking, for example Parallels Desktop, Docker Desktop, OrbStack, or UTM. It lives only in the live ruleset while that service runs; Apple's stock `pf.conf` warns about exactly these dynamic anchors. In the original report the anchor disappeared once Parallels Desktop was fully quit. A refusal restores the previous state: `pf.conf`, the anchor file, and the watcher end up as they were.
+
+Check what is attached:
+
+```bash
+sudo pfctl -sr | grep anchor
+```
+
+Quit the apps that use shared networking (a suspended VM is not enough; the app's networking service must exit), or turn off Internet Sharing in System Settings, confirm the anchor is gone, and rerun the script. Reopening the apps afterwards is fine: routine watcher runs reload only the Tailscale anchor and never touch the main ruleset. The full reload is needed only on install, uninstall, and when another PF reload has detached the Tailscale call. When the watcher's repair path hits this refusal, the explanation goes to the unified log; see [PF reloads](operations.md#automatic-pf-watcher) for the query.
+
+For an anchor this repo does not recognize, the scripts know only its name, not what it protects or how it must be attached. Do not stop a firewall or VPN while on an untrusted network, and do not hand-edit its attachment into `/etc/pf.conf`. Check that product's documentation for its supported persistent PF setup before retrying.
+
 ## Multiple Tailscale Backends Are Active
 
 Do not run the Homebrew `tailscaled` daemon and a Tailscale macOS app network extension at the same time. They can use different identities and `utun` interfaces, while the CLI, browser traffic, and PF rules each follow a different backend or route.

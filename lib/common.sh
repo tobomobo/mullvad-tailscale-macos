@@ -50,6 +50,16 @@ die() {
   exit 1
 }
 
+# Error detail that must survive launchd. The pf-watcher LaunchDaemon discards
+# stderr, so when stderr is not a terminal the message is also written to the
+# unified log. Messages name anchors and interfaces, never tailnet addresses.
+report_error() {
+  echo "$*" >&2
+  if [[ ! -t 2 ]]; then
+    logger -t mullvad-tailscale-macos -- "mullvad-tailscale-macos: $*" 2>/dev/null || true
+  fi
+}
+
 # For scripts whose only option is --help. Calls the caller's usage().
 parse_help_only() {
   if [[ $# -gt 0 ]]; then
@@ -612,6 +622,23 @@ restore_pf_conf_and_runtime() {
   rm -f "$rollback_conf"
 }
 
+# Human-readable hint for a runtime-only main-ruleset anchor call that blocks a
+# full reload. macOS inserts com.apple.internet-sharing for Internet Sharing and
+# for the shared (NAT) networking used by VM and container apps; the anchor
+# exists only while that service runs and is never written to /etc/pf.conf.
+explain_runtime_anchor() {
+  local anchor="$1"
+
+  case "$anchor" in
+    com.apple.internet-sharing|com.apple.internet-sharing/*)
+      echo "macOS attaches '$anchor' at runtime for Internet Sharing and for apps that use macOS shared (NAT) networking, for example Parallels Desktop, Docker Desktop, OrbStack, or UTM. Quit those apps or turn off Internet Sharing, confirm with 'sudo pfctl -sr | grep anchor' that the anchor is gone, then rerun this script. Reopening the apps afterwards is fine. See docs/troubleshooting.md#a-runtime-pf-anchor-blocks-the-reload."
+      ;;
+    *)
+      echo "'$anchor' was attached to the live ruleset by software this repo does not recognize, possibly a firewall or VPN. This script only knows the anchor's name, not what it protects. Do not stop a security product while on an untrusted network; check that product's documentation for its supported persistent PF setup before retrying. See docs/troubleshooting.md#a-runtime-pf-anchor-blocks-the-reload."
+      ;;
+  esac
+}
+
 pf_conf_covers_anchor() {
   local file="$1"
   local target="$2"
@@ -655,7 +682,8 @@ apply_pf_conf_update() {
     [[ -n "$active_anchor" ]] || continue
     if [[ "$active_anchor" != "$MULLVAD_ANCHOR_NAME" && "$active_anchor" != "$TAILSCALE_ANCHOR_NAME" ]] && \
       ! pf_conf_covers_anchor "$new_conf" "$active_anchor"; then
-      echo "Active main PF anchor call '$active_anchor' is not represented in the staged config; refusing to flush it." >&2
+      report_error "Active main PF anchor call '$active_anchor' is not represented in the staged config; refusing to flush it."
+      report_error "$(explain_runtime_anchor "$active_anchor")"
       return 1
     fi
   done <<<"$anchor_calls_before"
